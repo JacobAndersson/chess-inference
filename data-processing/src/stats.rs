@@ -1,22 +1,28 @@
 use serde::Serialize;
 use std::collections::HashMap;
 
-use crate::buckets::{elo_bucket, ply_bucket};
+use crate::buckets::elo_bucket;
 use crate::parser::GameData;
+use crate::time_control::TimeControl;
 
 #[derive(Default)]
 pub struct Statistics {
-    buckets: HashMap<(u16, u16), u64>,
+    elo_buckets: HashMap<u16, u64>,
+    time_control_counts: HashMap<TimeControl, u64>,
     pub games_processed: u64,
     pub games_skipped: u64,
 }
 
 #[derive(Serialize)]
-pub struct BucketEntry {
+pub struct EloBucketEntry {
     pub elo_min: u16,
     pub elo_max: u16,
-    pub ply_min: u16,
-    pub ply_max: u16,
+    pub count: u64,
+}
+
+#[derive(Serialize)]
+pub struct TimeControlEntry {
+    pub category: TimeControl,
     pub count: u64,
 }
 
@@ -24,7 +30,8 @@ pub struct BucketEntry {
 pub struct StatsOutput {
     pub total_games: u64,
     pub skipped_games: u64,
-    pub buckets: Vec<BucketEntry>,
+    pub elo_distribution: Vec<EloBucketEntry>,
+    pub time_control_distribution: Vec<TimeControlEntry>,
 }
 
 impl Statistics {
@@ -33,9 +40,12 @@ impl Statistics {
     }
 
     pub fn record_game(&mut self, game: &GameData) {
-        let elo = elo_bucket(game.avg_elo);
-        let ply = ply_bucket(game.ply_count);
-        *self.buckets.entry((elo, ply)).or_insert(0) += 1;
+        let elo = elo_bucket(game.max_elo);
+        *self.elo_buckets.entry(elo).or_insert(0) += 1;
+        *self
+            .time_control_counts
+            .entry(game.time_control)
+            .or_insert(0) += 1;
         self.games_processed += 1;
     }
 
@@ -44,24 +54,35 @@ impl Statistics {
     }
 
     pub fn to_output(&self) -> StatsOutput {
-        let mut buckets: Vec<BucketEntry> = self
-            .buckets
+        let mut elo_distribution: Vec<EloBucketEntry> = self
+            .elo_buckets
             .iter()
-            .map(|(&(elo, ply), &count)| BucketEntry {
+            .map(|(&elo, &count)| EloBucketEntry {
                 elo_min: elo,
                 elo_max: elo + 100,
-                ply_min: ply,
-                ply_max: ply + 10,
                 count,
             })
             .collect();
+        elo_distribution.sort_by_key(|b| b.elo_min);
 
-        buckets.sort_by_key(|b| (b.elo_min, b.ply_min));
+        let mut time_control_distribution: Vec<TimeControlEntry> = self
+            .time_control_counts
+            .iter()
+            .map(|(&category, &count)| TimeControlEntry { category, count })
+            .collect();
+        time_control_distribution.sort_by_key(|t| match t.category {
+            TimeControl::Bullet => 0,
+            TimeControl::Blitz => 1,
+            TimeControl::Rapid => 2,
+            TimeControl::Classical => 3,
+            TimeControl::Unknown => 4,
+        });
 
         StatsOutput {
             total_games: self.games_processed,
             skipped_games: self.games_skipped,
-            buckets,
+            elo_distribution,
+            time_control_distribution,
         }
     }
 }
@@ -70,58 +91,56 @@ impl Statistics {
 mod tests {
     use super::*;
 
+    fn game(max_elo: u16, time_control: TimeControl) -> GameData {
+        GameData {
+            max_elo,
+            ply_count: 40,
+            time_control,
+        }
+    }
+
     #[test]
     fn test_record_single_game() {
         let mut stats = Statistics::new();
-        stats.record_game(&GameData {
-            avg_elo: 1550,
-            ply_count: 45,
-        });
+        stats.record_game(&game(1550, TimeControl::Blitz));
 
         assert_eq!(stats.games_processed, 1);
         assert_eq!(stats.games_skipped, 0);
 
         let output = stats.to_output();
         assert_eq!(output.total_games, 1);
-        assert_eq!(output.buckets.len(), 1);
-        assert_eq!(output.buckets[0].elo_min, 1500);
-        assert_eq!(output.buckets[0].ply_min, 40);
-        assert_eq!(output.buckets[0].count, 1);
+        assert_eq!(output.elo_distribution.len(), 1);
+        assert_eq!(output.elo_distribution[0].elo_min, 1500);
+        assert_eq!(output.elo_distribution[0].count, 1);
+        assert_eq!(output.time_control_distribution.len(), 1);
+        assert_eq!(
+            output.time_control_distribution[0].category,
+            TimeControl::Blitz
+        );
+        assert_eq!(output.time_control_distribution[0].count, 1);
     }
 
     #[test]
     fn test_record_multiple_same_bucket() {
         let mut stats = Statistics::new();
-        stats.record_game(&GameData {
-            avg_elo: 1500,
-            ply_count: 40,
-        });
-        stats.record_game(&GameData {
-            avg_elo: 1550,
-            ply_count: 45,
-        });
+        stats.record_game(&game(1500, TimeControl::Blitz));
+        stats.record_game(&game(1550, TimeControl::Blitz));
 
         let output = stats.to_output();
         assert_eq!(output.total_games, 2);
-        assert_eq!(output.buckets.len(), 1);
-        assert_eq!(output.buckets[0].count, 2);
+        assert_eq!(output.elo_distribution.len(), 1);
+        assert_eq!(output.elo_distribution[0].count, 2);
     }
 
     #[test]
-    fn test_record_different_buckets() {
+    fn test_record_different_elo_buckets() {
         let mut stats = Statistics::new();
-        stats.record_game(&GameData {
-            avg_elo: 1500,
-            ply_count: 40,
-        });
-        stats.record_game(&GameData {
-            avg_elo: 2000,
-            ply_count: 80,
-        });
+        stats.record_game(&game(1500, TimeControl::Blitz));
+        stats.record_game(&game(2000, TimeControl::Blitz));
 
         let output = stats.to_output();
         assert_eq!(output.total_games, 2);
-        assert_eq!(output.buckets.len(), 2);
+        assert_eq!(output.elo_distribution.len(), 2);
     }
 
     #[test]
@@ -138,26 +157,75 @@ mod tests {
     }
 
     #[test]
-    fn test_output_sorted() {
+    fn test_elo_output_sorted() {
         let mut stats = Statistics::new();
-        stats.record_game(&GameData {
-            avg_elo: 2000,
-            ply_count: 80,
-        });
-        stats.record_game(&GameData {
-            avg_elo: 1500,
-            ply_count: 40,
-        });
-        stats.record_game(&GameData {
-            avg_elo: 1500,
-            ply_count: 80,
-        });
+        stats.record_game(&game(2000, TimeControl::Blitz));
+        stats.record_game(&game(1500, TimeControl::Blitz));
+        stats.record_game(&game(1800, TimeControl::Blitz));
 
         let output = stats.to_output();
-        assert_eq!(output.buckets[0].elo_min, 1500);
-        assert_eq!(output.buckets[0].ply_min, 40);
-        assert_eq!(output.buckets[1].elo_min, 1500);
-        assert_eq!(output.buckets[1].ply_min, 80);
-        assert_eq!(output.buckets[2].elo_min, 2000);
+        assert_eq!(output.elo_distribution[0].elo_min, 1500);
+        assert_eq!(output.elo_distribution[1].elo_min, 1800);
+        assert_eq!(output.elo_distribution[2].elo_min, 2000);
+    }
+
+    #[test]
+    fn test_time_control_distribution() {
+        let mut stats = Statistics::new();
+        stats.record_game(&game(1500, TimeControl::Bullet));
+        stats.record_game(&game(1500, TimeControl::Bullet));
+        stats.record_game(&game(1500, TimeControl::Blitz));
+        stats.record_game(&game(1500, TimeControl::Rapid));
+
+        let output = stats.to_output();
+        assert_eq!(output.time_control_distribution.len(), 3);
+
+        assert_eq!(
+            output.time_control_distribution[0].category,
+            TimeControl::Bullet
+        );
+        assert_eq!(output.time_control_distribution[0].count, 2);
+        assert_eq!(
+            output.time_control_distribution[1].category,
+            TimeControl::Blitz
+        );
+        assert_eq!(output.time_control_distribution[1].count, 1);
+        assert_eq!(
+            output.time_control_distribution[2].category,
+            TimeControl::Rapid
+        );
+        assert_eq!(output.time_control_distribution[2].count, 1);
+    }
+
+    #[test]
+    fn test_time_control_sorted_order() {
+        let mut stats = Statistics::new();
+        stats.record_game(&game(1500, TimeControl::Classical));
+        stats.record_game(&game(1500, TimeControl::Bullet));
+        stats.record_game(&game(1500, TimeControl::Unknown));
+        stats.record_game(&game(1500, TimeControl::Rapid));
+        stats.record_game(&game(1500, TimeControl::Blitz));
+
+        let output = stats.to_output();
+        assert_eq!(
+            output.time_control_distribution[0].category,
+            TimeControl::Bullet
+        );
+        assert_eq!(
+            output.time_control_distribution[1].category,
+            TimeControl::Blitz
+        );
+        assert_eq!(
+            output.time_control_distribution[2].category,
+            TimeControl::Rapid
+        );
+        assert_eq!(
+            output.time_control_distribution[3].category,
+            TimeControl::Classical
+        );
+        assert_eq!(
+            output.time_control_distribution[4].category,
+            TimeControl::Unknown
+        );
     }
 }

@@ -3,5 +3,6 @@ pub mod error;
 pub mod filters;
 pub mod parser;
 pub mod stats;
+pub mod time_control;
 pub mod training_visitor;
 pub mod training_writer;

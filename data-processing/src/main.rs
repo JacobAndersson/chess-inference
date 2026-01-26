@@ -15,16 +15,23 @@ struct Args {
     /// Path to the PGN file to process
     pgn_file: PathBuf,
 
-    /// Output directory for statistics JSON
-    #[arg(short, long, default_value = "./processed_games/")]
-    output: PathBuf,
+    /// Output directory for statistics JSON (defaults to stats/ alongside input file)
+    #[arg(short, long)]
+    output: Option<PathBuf>,
 }
 
 fn main() -> Result<(), PgnError> {
     let args = Args::parse();
 
+    let output_dir = args.output.unwrap_or_else(|| {
+        args.pgn_file
+            .parent()
+            .map(|p| p.join("stats"))
+            .unwrap_or_else(|| PathBuf::from("stats"))
+    });
+
     let stats = process_pgn(&args.pgn_file)?;
-    write_output(&stats, &args.output, &args.pgn_file)?;
+    write_output(&stats, &output_dir, &args.pgn_file)?;
 
     println!(
         "Processed {} games, skipped {} games",

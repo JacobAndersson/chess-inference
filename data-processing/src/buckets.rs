@@ -1,8 +1,8 @@
-pub fn elo_bucket(avg_elo: u16) -> u16 {
-    if avg_elo < 1000 {
+pub fn elo_bucket(max_elo: u16) -> u16 {
+    if max_elo < 1000 {
         0
     } else {
-        (avg_elo / 100) * 100
+        (max_elo / 100) * 100
     }
 }
 
