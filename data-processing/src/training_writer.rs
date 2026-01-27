@@ -7,23 +7,16 @@ use crate::error::PgnError;
 use crate::tokenizer::ChessTokenizer;
 use crate::training_visitor::TrainingGameData;
 
-const ELO_BUCKETS: &[(u16, &str, &str)] = &[
-    (1200, "elo_1200.txt", "tokens_elo_1200.txt"),
-    (1500, "elo_1500.txt", "tokens_elo_1500.txt"),
-    (1800, "elo_1800.txt", "tokens_elo_1800.txt"),
-    (2000, "elo_2000.txt", "tokens_elo_2000.txt"),
-    (2500, "elo_2500.txt", "tokens_elo_2500.txt"),
-];
-
-const ALL_BUCKET: &str = "elo_all.txt";
-const ALL_BUCKET_TOKENS: &str = "tokens_elo_all.txt";
+const ELO_BUCKETS: &[u16] = &[1200, 1500, 1800, 2000, 2500];
 const MAX_GAME_LENGTH: usize = 2048;
+const TEST_SPLIT_MODULO: u64 = 20; // Every 20th game goes to test (5%)
 
 pub struct TrainingWriter {
-    writers: HashMap<&'static str, BufWriter<File>>,
-    counts: HashMap<&'static str, u64>,
+    writers: HashMap<String, BufWriter<File>>,
+    counts: HashMap<String, u64>,
     tokenize: bool,
     token_buffer: Vec<u8>,
+    game_counter: u64,
 }
 
 impl TrainingWriter {
@@ -33,34 +26,47 @@ impl TrainingWriter {
         let mut writers = HashMap::new();
         let mut counts = HashMap::new();
 
-        for (_, text_filename, token_filename) in ELO_BUCKETS {
-            let filename = if tokenize {
-                *token_filename
-            } else {
-                *text_filename
-            };
-            let path = output_dir.join(filename);
-            let file = File::create(&path).map_err(|e| PgnError::io(&path, e))?;
-            writers.insert(filename, BufWriter::new(file));
-            counts.insert(filename, 0);
+        for elo in ELO_BUCKETS {
+            for split in ["train", "test"] {
+                let filename = Self::filename(*elo, split, tokenize);
+                let path = output_dir.join(&filename);
+                let file = File::create(&path).map_err(|e| PgnError::io(&path, e))?;
+                writers.insert(filename.clone(), BufWriter::new(file));
+                counts.insert(filename, 0);
+            }
         }
 
-        let all_filename = if tokenize {
-            ALL_BUCKET_TOKENS
-        } else {
-            ALL_BUCKET
-        };
-        let all_path = output_dir.join(all_filename);
-        let all_file = File::create(&all_path).map_err(|e| PgnError::io(&all_path, e))?;
-        writers.insert(all_filename, BufWriter::new(all_file));
-        counts.insert(all_filename, 0);
+        for split in ["train", "test"] {
+            let filename = Self::all_filename(split, tokenize);
+            let path = output_dir.join(&filename);
+            let file = File::create(&path).map_err(|e| PgnError::io(&path, e))?;
+            writers.insert(filename.clone(), BufWriter::new(file));
+            counts.insert(filename, 0);
+        }
 
         Ok(Self {
             writers,
             counts,
             tokenize,
             token_buffer: vec![0u8; MAX_GAME_LENGTH],
+            game_counter: 0,
         })
+    }
+
+    fn filename(elo: u16, split: &str, tokenize: bool) -> String {
+        if tokenize {
+            format!("tokens_elo_{elo}_{split}.txt")
+        } else {
+            format!("elo_{elo}_{split}.txt")
+        }
+    }
+
+    fn all_filename(split: &str, tokenize: bool) -> String {
+        if tokenize {
+            format!("tokens_elo_all_{split}.txt")
+        } else {
+            format!("elo_all_{split}.txt")
+        }
     }
 
     pub fn write_game(&mut self, game: &TrainingGameData) -> Result<(), PgnError> {
@@ -72,23 +78,22 @@ impl TrainingWriter {
             line
         };
 
-        for (threshold, text_filename, token_filename) in ELO_BUCKETS {
-            if game.avg_elo < *threshold {
-                let filename = if self.tokenize {
-                    *token_filename
-                } else {
-                    *text_filename
-                };
-                self.write_to_bucket(filename, &formatted)?;
+        let split = if self.game_counter.is_multiple_of(TEST_SPLIT_MODULO) {
+            "test"
+        } else {
+            "train"
+        };
+        self.game_counter += 1;
+
+        for elo in ELO_BUCKETS {
+            if game.avg_elo < *elo {
+                let filename = Self::filename(*elo, split, self.tokenize);
+                self.write_to_bucket(&filename, &formatted)?;
             }
         }
 
-        let all_filename = if self.tokenize {
-            ALL_BUCKET_TOKENS
-        } else {
-            ALL_BUCKET
-        };
-        self.write_to_bucket(all_filename, &formatted)?;
+        let all_filename = Self::all_filename(split, self.tokenize);
+        self.write_to_bucket(&all_filename, &formatted)?;
 
         Ok(())
     }
@@ -105,10 +110,10 @@ impl TrainingWriter {
         Ok(token_strings.join(","))
     }
 
-    fn write_to_bucket(&mut self, bucket: &'static str, line: &str) -> Result<(), PgnError> {
+    fn write_to_bucket(&mut self, bucket: &str, line: &str) -> Result<(), PgnError> {
         if let Some(writer) = self.writers.get_mut(bucket) {
             writeln!(writer, "{line}").map_err(|e| PgnError::Parse(e.to_string()))?;
-            *self.counts.entry(bucket).or_insert(0) += 1;
+            *self.counts.entry(bucket.to_string()).or_insert(0) += 1;
         }
         Ok(())
     }
@@ -120,7 +125,7 @@ impl TrainingWriter {
         Ok(())
     }
 
-    pub fn counts(&self) -> &HashMap<&'static str, u64> {
+    pub fn counts(&self) -> &HashMap<String, u64> {
         &self.counts
     }
 }
@@ -140,17 +145,23 @@ mod tests {
         }
     }
 
+    fn read_both_splits(dir: &Path, base: &str) -> String {
+        let train = fs::read_to_string(dir.join(format!("{base}_train.txt"))).unwrap_or_default();
+        let test = fs::read_to_string(dir.join(format!("{base}_test.txt"))).unwrap_or_default();
+        format!("{train}{test}")
+    }
+
     #[test]
     fn test_creates_all_bucket_files() {
         let dir = tempdir().expect("create tempdir");
         let _writer = TrainingWriter::new(dir.path(), false).expect("create writer");
 
-        assert!(dir.path().join("elo_1200.txt").exists());
-        assert!(dir.path().join("elo_1500.txt").exists());
-        assert!(dir.path().join("elo_1800.txt").exists());
-        assert!(dir.path().join("elo_2000.txt").exists());
-        assert!(dir.path().join("elo_2500.txt").exists());
-        assert!(dir.path().join("elo_all.txt").exists());
+        for elo in [1200, 1500, 1800, 2000, 2500] {
+            assert!(dir.path().join(format!("elo_{elo}_train.txt")).exists());
+            assert!(dir.path().join(format!("elo_{elo}_test.txt")).exists());
+        }
+        assert!(dir.path().join("elo_all_train.txt").exists());
+        assert!(dir.path().join("elo_all_test.txt").exists());
     }
 
     #[test]
@@ -158,12 +169,18 @@ mod tests {
         let dir = tempdir().expect("create tempdir");
         let _writer = TrainingWriter::new(dir.path(), true).expect("create writer");
 
-        assert!(dir.path().join("tokens_elo_1200.txt").exists());
-        assert!(dir.path().join("tokens_elo_1500.txt").exists());
-        assert!(dir.path().join("tokens_elo_1800.txt").exists());
-        assert!(dir.path().join("tokens_elo_2000.txt").exists());
-        assert!(dir.path().join("tokens_elo_2500.txt").exists());
-        assert!(dir.path().join("tokens_elo_all.txt").exists());
+        for elo in [1200, 1500, 1800, 2000, 2500] {
+            assert!(dir
+                .path()
+                .join(format!("tokens_elo_{elo}_train.txt"))
+                .exists());
+            assert!(dir
+                .path()
+                .join(format!("tokens_elo_{elo}_test.txt"))
+                .exists());
+        }
+        assert!(dir.path().join("tokens_elo_all_train.txt").exists());
+        assert!(dir.path().join("tokens_elo_all_test.txt").exists());
     }
 
     #[test]
@@ -175,9 +192,9 @@ mod tests {
         writer.write_game(&game).expect("write game");
         writer.flush().expect("flush");
 
-        let all = fs::read_to_string(dir.path().join("elo_all.txt")).expect("read all");
-        let b1200 = fs::read_to_string(dir.path().join("elo_1200.txt")).expect("read 1200");
-        let b1500 = fs::read_to_string(dir.path().join("elo_1500.txt")).expect("read 1500");
+        let all = read_both_splits(dir.path(), "elo_all");
+        let b1200 = read_both_splits(dir.path(), "elo_1200");
+        let b1500 = read_both_splits(dir.path(), "elo_1500");
 
         assert!(all.contains("e4 e5 Nf3"));
         assert!(b1200.contains("e4 e5 Nf3"));
@@ -193,10 +210,10 @@ mod tests {
         writer.write_game(&game).expect("write game");
         writer.flush().expect("flush");
 
-        let b1200 = fs::read_to_string(dir.path().join("elo_1200.txt")).expect("read 1200");
-        let b1500 = fs::read_to_string(dir.path().join("elo_1500.txt")).expect("read 1500");
-        let b1800 = fs::read_to_string(dir.path().join("elo_1800.txt")).expect("read 1800");
-        let all = fs::read_to_string(dir.path().join("elo_all.txt")).expect("read all");
+        let b1200 = read_both_splits(dir.path(), "elo_1200");
+        let b1500 = read_both_splits(dir.path(), "elo_1500");
+        let b1800 = read_both_splits(dir.path(), "elo_1800");
+        let all = read_both_splits(dir.path(), "elo_all");
 
         assert!(b1200.is_empty());
         assert!(b1500.is_empty());
@@ -213,26 +230,45 @@ mod tests {
         writer.write_game(&game).expect("write game");
         writer.flush().expect("flush");
 
-        let b2500 = fs::read_to_string(dir.path().join("elo_2500.txt")).expect("read 2500");
-        let all = fs::read_to_string(dir.path().join("elo_all.txt")).expect("read all");
+        let b2500 = read_both_splits(dir.path(), "elo_2500");
+        let all = read_both_splits(dir.path(), "elo_all");
 
         assert!(b2500.is_empty());
         assert!(all.contains("e4 e5 Nf3"));
     }
 
     #[test]
-    fn test_counts_tracked() {
+    fn test_train_test_split_ratio() {
+        let dir = tempdir().expect("create tempdir");
+        let mut writer = TrainingWriter::new(dir.path(), false).expect("create writer");
+
+        // Write 100 games
+        for _ in 0..100 {
+            writer.write_game(&make_game(1100)).expect("write");
+        }
+        writer.flush().expect("flush");
+
+        let counts = writer.counts();
+        let train = *counts.get("elo_all_train.txt").unwrap_or(&0);
+        let test = *counts.get("elo_all_test.txt").unwrap_or(&0);
+
+        assert_eq!(train, 95); // 95% train
+        assert_eq!(test, 5); // 5% test
+    }
+
+    #[test]
+    fn test_first_game_goes_to_test() {
         let dir = tempdir().expect("create tempdir");
         let mut writer = TrainingWriter::new(dir.path(), false).expect("create writer");
 
         writer.write_game(&make_game(1100)).expect("write");
-        writer.write_game(&make_game(1400)).expect("write");
-        writer.write_game(&make_game(2600)).expect("write");
+        writer.flush().expect("flush");
 
-        let counts = writer.counts();
-        assert_eq!(*counts.get("elo_all.txt").unwrap_or(&0), 3);
-        assert_eq!(*counts.get("elo_1200.txt").unwrap_or(&0), 1);
-        assert_eq!(*counts.get("elo_1500.txt").unwrap_or(&0), 2);
+        let test = fs::read_to_string(dir.path().join("elo_all_test.txt")).expect("read");
+        let train = fs::read_to_string(dir.path().join("elo_all_train.txt")).expect("read");
+
+        assert!(test.contains("e4 e5 Nf3"));
+        assert!(train.is_empty());
     }
 
     #[test]
@@ -244,19 +280,16 @@ mod tests {
         writer.write_game(&game).expect("write game");
         writer.flush().expect("flush");
 
-        let content = fs::read_to_string(dir.path().join("tokens_elo_all.txt")).expect("read");
+        let content = read_both_splits(dir.path(), "tokens_elo_all");
         let line = content.trim();
 
-        // Verify format is comma-separated integers
         let tokens: Vec<u8> = line
             .split(',')
             .map(|s| s.parse::<u8>().expect("parse token"))
             .collect();
 
-        // Should end with EOS token (30)
         assert_eq!(*tokens.last().expect("last token"), 30);
 
-        // Decode back to original
         let decoded = ChessTokenizer::decode(&tokens);
         assert_eq!(decoded, "e4 e5 Nf3");
     }
@@ -269,8 +302,8 @@ mod tests {
         writer.write_game(&make_game(1100)).expect("write");
         writer.flush().expect("flush");
 
-        let b1200 = fs::read_to_string(dir.path().join("tokens_elo_1200.txt")).expect("read");
-        let all = fs::read_to_string(dir.path().join("tokens_elo_all.txt")).expect("read");
+        let b1200 = read_both_splits(dir.path(), "tokens_elo_1200");
+        let all = read_both_splits(dir.path(), "tokens_elo_all");
 
         assert!(!b1200.is_empty());
         assert!(!all.is_empty());
@@ -290,7 +323,7 @@ mod tests {
         writer.write_game(&game).expect("write game");
         writer.flush().expect("flush");
 
-        let content = fs::read_to_string(dir.path().join("tokens_elo_all.txt")).expect("read");
+        let content = read_both_splits(dir.path(), "tokens_elo_all");
         let tokens: Vec<u8> = content
             .trim()
             .split(',')

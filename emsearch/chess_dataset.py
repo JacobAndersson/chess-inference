@@ -39,6 +39,8 @@ class ChessTokenDataset(IterableDataset):
         data_dir: Path | str,
         elo_bucket: str = "all",
         max_seq_len: int | None = None,
+        max_games: int | None = None,
+        split: str = "train",
     ) -> None:
         """Initialize the dataset.
 
@@ -46,11 +48,15 @@ class ChessTokenDataset(IterableDataset):
             data_dir: Directory containing token files
             elo_bucket: ELO bucket to load ("1200", "1500", "1800", "2000", "2500", "all")
             max_seq_len: Maximum sequence length (truncates if exceeded)
+            max_games: Maximum number of games to load (None for all)
+            split: "train" or "test"
         """
         self.data_dir = Path(data_dir)
         self.elo_bucket = elo_bucket
         self.max_seq_len = max_seq_len
-        self.file_path = self.data_dir / f"tokens_elo_{elo_bucket}.txt"
+        self.max_games = max_games
+        self.split = split
+        self.file_path = self.data_dir / f"tokens_elo_{elo_bucket}_{split}.txt"
 
         if not self.file_path.exists():
             msg = f"Token file not found: {self.file_path}"
@@ -58,8 +64,12 @@ class ChessTokenDataset(IterableDataset):
 
     def __iter__(self) -> Iterator[torch.Tensor]:
         """Iterate over tokenized games, yielding one tensor per game."""
+        games_yielded = 0
         with self.file_path.open() as f:
             for raw_line in f:
+                if self.max_games is not None and games_yielded >= self.max_games:
+                    return
+
                 line = raw_line.strip()
                 if not line:
                     continue
@@ -69,6 +79,7 @@ class ChessTokenDataset(IterableDataset):
                 if self.max_seq_len is not None and len(tokens) > self.max_seq_len:
                     tokens = tokens[: self.max_seq_len]
 
+                games_yielded += 1
                 yield torch.tensor(tokens, dtype=torch.long)
 
 
@@ -94,8 +105,9 @@ def create_dataloader(
     elo_bucket: str = "all",
     batch_size: int = 32,
     max_seq_len: int | None = None,
+    max_games: int | None = None,
+    split: str = "train",
     num_workers: int = 0,
-    shuffle_buffer: int | None = None,  # noqa: ARG001
 ) -> DataLoader:
     """Create a DataLoader for tokenized chess games.
 
@@ -104,13 +116,14 @@ def create_dataloader(
         elo_bucket: ELO bucket to load
         batch_size: Batch size
         max_seq_len: Maximum sequence length
+        max_games: Maximum number of games to load
+        split: "train" or "test"
         num_workers: Number of data loading workers
-        shuffle_buffer: If provided, shuffle using a buffer of this size (not implemented)
 
     Returns:
         DataLoader yielding batches with 'input_ids' and 'attention_mask'
     """
-    dataset = ChessTokenDataset(data_dir, elo_bucket, max_seq_len)
+    dataset = ChessTokenDataset(data_dir, elo_bucket, max_seq_len, max_games, split)
 
     return DataLoader(
         dataset,
