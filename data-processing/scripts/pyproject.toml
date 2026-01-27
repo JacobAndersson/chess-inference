@@ -5,7 +5,6 @@ description = "Visualization scripts for chess game statistics"
 requires-python = ">=3.10"
 dependencies = [
     "matplotlib>=3.7.0",
-    "torch>=2.0.0",
 ]
 
 [tool.uv]
