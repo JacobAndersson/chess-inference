@@ -46,7 +46,7 @@ impl Visitor for TrainingVisitor {
             b"WhiteElo" => self.white_elo = parse_elo(value_bytes),
             b"BlackElo" => self.black_elo = parse_elo(value_bytes),
             b"Result" => self.result = parse_result(value_bytes),
-            _ => {}
+            _ => {},
         }
     }
 

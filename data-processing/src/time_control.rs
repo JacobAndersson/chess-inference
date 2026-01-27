@@ -13,9 +13,8 @@ pub enum TimeControl {
 
 impl TimeControl {
     pub fn from_header(value: &[u8]) -> Self {
-        let s = match std::str::from_utf8(value) {
-            Ok(s) => s,
-            Err(_) => return TimeControl::Unknown,
+        let Ok(s) = std::str::from_utf8(value) else {
+            return TimeControl::Unknown;
         };
 
         if s == "-" || s == "?" {

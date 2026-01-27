@@ -1,2 +1,17 @@
+# Rustfmt configuration - mirrors ESLint/Prettier formatting rules
+# Note: Some advanced options require nightly; these are stable-only
+
 edition = "2024"
-style_edition = "2024"
+max_width = 100
+tab_spaces = 4
+newline_style = "Unix"
+
+# Import organization (stable in 2024 edition)
+reorder_imports = true
+reorder_modules = true
+
+# Control flow
+match_block_trailing_comma = true
+
+# Function formatting
+fn_params_layout = "Tall"

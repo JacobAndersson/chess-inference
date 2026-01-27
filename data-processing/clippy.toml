@@ -1,6 +1,22 @@
+# Clippy configuration - mirrors ESLint strict rules where applicable
+
+# Allow in tests (existing)
 allow-expect-in-tests = true
 allow-unwrap-in-tests = true
 
-# Increase the size threshold for result_large_err to accommodate
-# richer error variants.
+# Error size threshold (existing)
 large-error-threshold = 256
+
+# Complexity limits (from ESLint config)
+cognitive-complexity-threshold = 20      # complexity: 20
+too-many-arguments-threshold = 4         # max-params: 4
+too-many-lines-threshold = 120           # max-lines-per-function: 120
+type-complexity-threshold = 250
+
+# Large types that should be boxed
+trivial-copy-size-limit = 8
+pass-by-value-size-limit = 256
+
+# Identifier length (like ESLint id-length)
+allowed-idents-below-min-chars = ["i", "j", "k", "n", "x", "y", "id", "to", "e", "f"]
+min-ident-chars-threshold = 2

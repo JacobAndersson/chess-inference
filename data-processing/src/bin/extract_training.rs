@@ -58,13 +58,13 @@ fn main() -> Result<(), PgnError> {
     writer.flush()?;
 
     println!("\n=== Summary ===");
-    println!("Games written:  {}", total_processed);
-    println!("Games filtered: {} (short/incomplete)", total_filtered);
-    println!("Games skipped:  {} (missing ELO)", total_skipped);
+    println!("Games written:  {total_processed}");
+    println!("Games filtered: {total_filtered} (short/incomplete)");
+    println!("Games skipped:  {total_skipped} (missing ELO)");
 
     println!("\nOutput files:");
     for (bucket, count) in writer.counts() {
-        println!("  {}: {} games", bucket, count);
+        println!("  {bucket}: {count} games");
     }
 
     Ok(())
@@ -77,7 +77,7 @@ fn find_pgn_files(dir: &Path) -> Result<Vec<PathBuf>, PgnError> {
         .ok_or_else(|| PgnError::Argument("Invalid path encoding".to_string()))?;
 
     let files: Vec<PathBuf> = glob(pattern_str)
-        .map_err(|e| PgnError::Argument(format!("Invalid glob pattern: {}", e)))?
+        .map_err(|e| PgnError::Argument(format!("Invalid glob pattern: {e}")))?
         .filter_map(Result::ok)
         .collect();
 
@@ -103,10 +103,10 @@ fn process_pgn(path: &Path, writer: &mut TrainingWriter) -> Result<(u64, u64, u6
                 } else {
                     filtered += 1;
                 }
-            }
+            },
             Ok(Some(None)) => {
                 skipped += 1;
-            }
+            },
             Ok(None) => break,
             Err(e) => return Err(PgnError::Parse(e.to_string())),
         }

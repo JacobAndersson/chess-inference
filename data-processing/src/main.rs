@@ -33,7 +33,7 @@ fn main() -> Result<(), PgnError> {
         rayon::ThreadPoolBuilder::new()
             .num_threads(workers)
             .build_global()
-            .map_err(|e| PgnError::Parse(format!("Failed to configure thread pool: {}", e)))?;
+            .map_err(|e| PgnError::Parse(format!("Failed to configure thread pool: {e}")))?;
     }
 
     let is_folder = args.input.is_dir();
@@ -64,8 +64,7 @@ fn main() -> Result<(), PgnError> {
         } else {
             args.input
                 .parent()
-                .map(|p| p.join("stats"))
-                .unwrap_or_else(|| PathBuf::from("stats"))
+                .map_or_else(|| PathBuf::from("stats"), |p| p.join("stats"))
         }
     });
 
@@ -97,7 +96,7 @@ fn collect_pgn_files(path: &Path) -> Result<Vec<PathBuf>, PgnError> {
         .ok_or_else(|| PgnError::Parse("Invalid path encoding".to_string()))?;
 
     let files: Vec<PathBuf> = glob::glob(pattern_str)
-        .map_err(|e| PgnError::Parse(format!("Invalid glob pattern: {}", e)))?
+        .map_err(|e| PgnError::Parse(format!("Invalid glob pattern: {e}")))?
         .filter_map(Result::ok)
         .collect();
 
@@ -118,10 +117,10 @@ fn process_pgn(path: &Path) -> Result<Statistics, PgnError> {
         match pgn_reader.read_game(&mut visitor) {
             Ok(Some(Some(game_data))) => {
                 stats.record_game(&game_data);
-            }
+            },
             Ok(Some(None)) => {
                 stats.record_skipped();
-            }
+            },
             Ok(None) => break,
             Err(e) => return Err(PgnError::Parse(e.to_string())),
         }
@@ -140,19 +139,19 @@ fn write_output(
 
     let filename = if is_folder {
         let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S");
-        format!("{}_stats.json", timestamp)
+        format!("{timestamp}_stats.json")
     } else {
         let stem = input_path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("stats");
-        format!("{}_stats.json", stem)
+        format!("{stem}_stats.json")
     };
 
     let output_path = output_dir.join(filename);
     let output = stats.to_output();
     let json = serde_json::to_string_pretty(&output)
-        .map_err(|e| PgnError::Parse(format!("JSON serialization failed: {}", e)))?;
+        .map_err(|e| PgnError::Parse(format!("JSON serialization failed: {e}")))?;
 
     fs::write(&output_path, json).map_err(|e| PgnError::io(&output_path, e))?;
 

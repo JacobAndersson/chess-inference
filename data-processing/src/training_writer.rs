@@ -95,7 +95,7 @@ impl TrainingWriter {
 
     fn tokenize_game(&mut self, moves: &str) -> Result<String, PgnError> {
         let len = ChessTokenizer::encode_with_eos(moves, &mut self.token_buffer)
-            .ok_or_else(|| PgnError::Parse(format!("Failed to tokenize game: {}", moves)))?;
+            .ok_or_else(|| PgnError::Parse(format!("Failed to tokenize game: {moves}")))?;
 
         let token_strings: Vec<String> = self.token_buffer[..len]
             .iter()
@@ -107,7 +107,7 @@ impl TrainingWriter {
 
     fn write_to_bucket(&mut self, bucket: &'static str, line: &str) -> Result<(), PgnError> {
         if let Some(writer) = self.writers.get_mut(bucket) {
-            writeln!(writer, "{}", line).map_err(|e| PgnError::Parse(e.to_string()))?;
+            writeln!(writer, "{line}").map_err(|e| PgnError::Parse(e.to_string()))?;
             *self.counts.entry(bucket).or_insert(0) += 1;
         }
         Ok(())
