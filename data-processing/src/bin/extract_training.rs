@@ -20,6 +20,10 @@ struct Args {
     /// Output directory for training data
     #[arg(short, long, default_value = "./processed_games/training/")]
     output: PathBuf,
+
+    /// Output tokenized format (comma-separated token IDs) instead of SAN moves
+    #[arg(long, default_value = "false")]
+    tokenize: bool,
 }
 
 fn main() -> Result<(), PgnError> {
@@ -34,8 +38,11 @@ fn main() -> Result<(), PgnError> {
     }
 
     println!("Found {} PGN files", pgn_files.len());
+    if args.tokenize {
+        println!("Tokenization mode enabled");
+    }
 
-    let mut writer = TrainingWriter::new(&args.output)?;
+    let mut writer = TrainingWriter::new(&args.output, args.tokenize)?;
     let mut total_processed = 0u64;
     let mut total_skipped = 0u64;
     let mut total_filtered = 0u64;
