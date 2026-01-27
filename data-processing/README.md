@@ -6,18 +6,26 @@ Tools for processing PGN files and extracting statistics from chess games.
 
 ### pgn-stats (`data-processing`)
 
-Processes PGN files and outputs game statistics as JSON, bucketed by max ELO and time control.
+Processes PGN files and outputs game statistics as JSON, bucketed by max ELO and time control. Supports both single files and folders with parallel processing.
 
 ```bash
-cargo run --release --bin data-processing -- <pgn-file> [-o <output-dir>]
+cargo run --release --bin data-processing -- <input> [-o <output-dir>] [-j <num-workers>]
 ```
 
-Output defaults to `stats/` alongside the input file.
+Arguments:
+- `<input>` - Path to a PGN file or folder containing PGN files
+- `-o, --output` - Output directory (defaults to `stats/` alongside input)
+- `-j, --num-workers` - Number of worker threads (defaults to CPU core count)
 
-Example:
+Examples:
 ```bash
+# Single file
 cargo run --release --bin data-processing -- ../games/lichess_db_standard_rated_2014-10.pgn
 # Writes to ../games/stats/lichess_db_standard_rated_2014-10_stats.json
+
+# Folder with 4 workers
+cargo run --release --bin data-processing -- ../games/ -j 4
+# Writes to ../games/stats/2026-01-26_12-30-45_stats.json (datetime-based filename)
 ```
 
 Output JSON structure:

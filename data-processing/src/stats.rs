@@ -53,6 +53,17 @@ impl Statistics {
         self.games_skipped += 1;
     }
 
+    pub fn merge(&mut self, other: Statistics) {
+        for (elo, count) in other.elo_buckets {
+            *self.elo_buckets.entry(elo).or_insert(0) += count;
+        }
+        for (tc, count) in other.time_control_counts {
+            *self.time_control_counts.entry(tc).or_insert(0) += count;
+        }
+        self.games_processed += other.games_processed;
+        self.games_skipped += other.games_skipped;
+    }
+
     pub fn to_output(&self) -> StatsOutput {
         let mut elo_distribution: Vec<EloBucketEntry> = self
             .elo_buckets
@@ -227,5 +238,92 @@ mod tests {
             output.time_control_distribution[4].category,
             TimeControl::Unknown
         );
+    }
+
+    #[test]
+    fn test_merge_empty_stats() {
+        let mut stats1 = Statistics::new();
+        stats1.record_game(&game(1500, TimeControl::Blitz));
+
+        let stats2 = Statistics::new();
+        stats1.merge(stats2);
+
+        assert_eq!(stats1.games_processed, 1);
+        assert_eq!(stats1.games_skipped, 0);
+    }
+
+    #[test]
+    fn test_merge_combines_elo_buckets() {
+        let mut stats1 = Statistics::new();
+        stats1.record_game(&game(1500, TimeControl::Blitz));
+        stats1.record_game(&game(1550, TimeControl::Blitz));
+
+        let mut stats2 = Statistics::new();
+        stats2.record_game(&game(1520, TimeControl::Rapid));
+        stats2.record_game(&game(2000, TimeControl::Bullet));
+
+        stats1.merge(stats2);
+
+        let output = stats1.to_output();
+        assert_eq!(output.total_games, 4);
+        assert_eq!(output.elo_distribution.len(), 2);
+
+        let elo_1500 = output
+            .elo_distribution
+            .iter()
+            .find(|e| e.elo_min == 1500)
+            .expect("should have 1500 bucket");
+        assert_eq!(elo_1500.count, 3);
+
+        let elo_2000 = output
+            .elo_distribution
+            .iter()
+            .find(|e| e.elo_min == 2000)
+            .expect("should have 2000 bucket");
+        assert_eq!(elo_2000.count, 1);
+    }
+
+    #[test]
+    fn test_merge_combines_time_controls() {
+        let mut stats1 = Statistics::new();
+        stats1.record_game(&game(1500, TimeControl::Blitz));
+        stats1.record_game(&game(1500, TimeControl::Blitz));
+
+        let mut stats2 = Statistics::new();
+        stats2.record_game(&game(1500, TimeControl::Blitz));
+        stats2.record_game(&game(1500, TimeControl::Rapid));
+
+        stats1.merge(stats2);
+
+        let output = stats1.to_output();
+        let blitz = output
+            .time_control_distribution
+            .iter()
+            .find(|t| t.category == TimeControl::Blitz)
+            .expect("should have blitz");
+        assert_eq!(blitz.count, 3);
+
+        let rapid = output
+            .time_control_distribution
+            .iter()
+            .find(|t| t.category == TimeControl::Rapid)
+            .expect("should have rapid");
+        assert_eq!(rapid.count, 1);
+    }
+
+    #[test]
+    fn test_merge_combines_skipped() {
+        let mut stats1 = Statistics::new();
+        stats1.record_skipped();
+        stats1.record_skipped();
+
+        let mut stats2 = Statistics::new();
+        stats2.record_skipped();
+        stats2.record_game(&game(1500, TimeControl::Blitz));
+
+        stats1.merge(stats2);
+
+        assert_eq!(stats1.games_processed, 1);
+        assert_eq!(stats1.games_skipped, 3);
     }
 }
