@@ -1,10 +1,121 @@
 [project]
 name = "emsearch"
 version = "0.1.0"
-description = "Add your description here"
+description = "Chess transformer training code"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "ruff>=0.14.14",
     "torch>=2.0.0",
 ]
+
+# Ruff configuration - mirrors ESLint strict rules
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    # Core rules (like ESLint recommended)
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+
+    # Code quality (like ESLint strict rules)
+    "B",      # flake8-bugbear - catches bugs and design problems
+    "C4",     # flake8-comprehensions - better list/dict/set comprehensions
+    "SIM",    # flake8-simplify - simplify code (like unicorn rules)
+    "PIE",    # flake8-pie - misc lints
+    "RUF",    # Ruff-specific rules
+
+    # Complexity (like ESLint complexity, sonarjs/cognitive-complexity)
+    "C90",    # mccabe complexity
+
+    # Import organization (like ESLint import/order)
+    "I",      # isort
+    "ICN",    # flake8-import-conventions
+
+    # Security (like ESLint security plugin)
+    "S",      # flake8-bandit security checks
+
+    # Style (like ESLint unicorn, prefer-* rules)
+    "UP",     # pyupgrade - use modern Python syntax
+    "PERF",   # perflint - performance anti-patterns
+    "FURB",   # refurb - modernize code
+
+    # Type checking hints
+    "TCH",    # flake8-type-checking
+    "ANN",    # flake8-annotations (partial)
+
+    # Documentation
+    "D",      # pydocstyle (partial)
+
+    # Error handling (like ESLint promise rules)
+    "TRY",    # tryceratops - exception handling
+    "EM",     # flake8-errmsg - exception messages
+
+    # Naming
+    "N",      # pep8-naming
+
+    # Misc quality
+    "PTH",    # flake8-use-pathlib
+    "PL",     # pylint subset
+    "RSE",    # flake8-raise
+    "RET",    # flake8-return
+    "FLY",    # flynt - use f-strings
+    "LOG",    # flake8-logging
+    "ARG",    # flake8-unused-arguments
+]
+
+ignore = [
+    # Too strict for ML/data code
+    "ANN401",  # dynamically typed expressions (Any)
+    "D100",    # missing docstring in public module
+    "D104",    # missing docstring in public package
+    "D107",    # missing docstring in __init__
+    "D203",    # one-blank-line-before-class (conflicts with D211)
+    "D213",    # multi-line-summary-second-line (conflicts with D212)
+
+    # Conflicts with formatter
+    "E501",    # line too long (formatter handles this)
+    "W191",    # indentation contains tabs
+
+    # Overly pedantic
+    "PLR0913", # too many arguments (we set threshold below)
+    "PLR2004", # magic value comparison (too noisy for ML code)
+    "S101",    # use of assert (fine in non-production code)
+    "TRY003",  # long exception messages (sometimes needed)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",    # asserts allowed in tests
+    "PLR2004", # magic values allowed in tests
+    "ANN",     # no type annotations required in tests
+    "D",       # no docstrings required in tests
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 20  # complexity: 20
+
+[tool.ruff.lint.pylint]
+max-args = 4         # max-params: 4
+max-branches = 12    # max-depth: ~4 (branches not depth)
+max-statements = 50  # reasonable limit
+
+[tool.ruff.lint.isort]
+# Import organization (like ESLint import/order)
+combine-as-imports = true
+force-wrap-aliases = true
+known-first-party = ["emsearch"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+docstring-code-format = true

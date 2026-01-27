@@ -1,11 +1,10 @@
 """Streaming dataset for tokenized chess games."""
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import torch
 from torch.utils.data import DataLoader, IterableDataset
-
 
 VOCAB_SIZE = 32
 EOS_TOKEN = 30
@@ -22,7 +21,7 @@ def encode(text: str) -> list[int]:
 
 def encode_with_eos(text: str) -> list[int]:
     """Encode a chess move sequence with EOS token appended."""
-    return encode(text) + [EOS_TOKEN]
+    return [*encode(text), EOS_TOKEN]
 
 
 def decode(tokens: list[int]) -> str:
@@ -40,8 +39,9 @@ class ChessTokenDataset(IterableDataset):
         data_dir: Path | str,
         elo_bucket: str = "all",
         max_seq_len: int | None = None,
-    ):
-        """
+    ) -> None:
+        """Initialize the dataset.
+
         Args:
             data_dir: Directory containing token files
             elo_bucket: ELO bucket to load ("1200", "1500", "1800", "2000", "2500", "all")
@@ -53,12 +53,14 @@ class ChessTokenDataset(IterableDataset):
         self.file_path = self.data_dir / f"tokens_elo_{elo_bucket}.txt"
 
         if not self.file_path.exists():
-            raise FileNotFoundError(f"Token file not found: {self.file_path}")
+            msg = f"Token file not found: {self.file_path}"
+            raise FileNotFoundError(msg)
 
     def __iter__(self) -> Iterator[torch.Tensor]:
-        with open(self.file_path, "r") as f:
-            for line in f:
-                line = line.strip()
+        """Iterate over tokenized games, yielding one tensor per game."""
+        with self.file_path.open() as f:
+            for raw_line in f:
+                line = raw_line.strip()
                 if not line:
                     continue
 
@@ -93,7 +95,7 @@ def create_dataloader(
     batch_size: int = 32,
     max_seq_len: int | None = None,
     num_workers: int = 0,
-    shuffle_buffer: int | None = None,
+    shuffle_buffer: int | None = None,  # noqa: ARG001
 ) -> DataLoader:
     """Create a DataLoader for tokenized chess games.
 
@@ -103,7 +105,7 @@ def create_dataloader(
         batch_size: Batch size
         max_seq_len: Maximum sequence length
         num_workers: Number of data loading workers
-        shuffle_buffer: If provided, shuffle using a buffer of this size (not implemented yet)
+        shuffle_buffer: If provided, shuffle using a buffer of this size (not implemented)
 
     Returns:
         DataLoader yielding batches with 'input_ids' and 'attention_mask'
