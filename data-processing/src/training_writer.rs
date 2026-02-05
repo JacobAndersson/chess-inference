@@ -69,6 +69,19 @@ impl TrainingWriter {
         }
     }
 
+    pub fn output_filenames(tokenize: bool) -> Vec<String> {
+        let mut filenames = Vec::new();
+        for elo in ELO_BUCKETS {
+            for split in ["train", "test"] {
+                filenames.push(Self::filename(*elo, split, tokenize));
+            }
+        }
+        for split in ["train", "test"] {
+            filenames.push(Self::all_filename(split, tokenize));
+        }
+        filenames
+    }
+
     pub fn write_game(&mut self, game: &TrainingGameData) -> Result<(), PgnError> {
         let line = game.moves.join(" ");
 

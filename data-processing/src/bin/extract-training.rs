@@ -2,13 +2,13 @@ use clap::Parser;
 use glob::glob;
 use pgn_reader::BufferedReader;
 use rayon::prelude::*;
-use std::fs::File;
-use std::io::BufReader;
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use data_processing::error::PgnError;
 use data_processing::filters::is_valid_training_game;
-use data_processing::training_visitor::{TrainingGameData, TrainingVisitor};
+use data_processing::training_visitor::TrainingVisitor;
 use data_processing::training_writer::TrainingWriter;
 
 #[derive(Parser)]
@@ -31,8 +31,7 @@ struct Args {
     tokenize: bool,
 }
 
-struct ProcessedFile {
-    games: Vec<TrainingGameData>,
+struct ProcessingStats {
     processed: u64,
     skipped: u64,
     filtered: u64,
@@ -48,13 +47,14 @@ fn main() -> Result<(), PgnError> {
             .map_err(|e| PgnError::Argument(format!("Failed to set thread count: {e}")))?;
     }
 
-    let pgn_files = collect_pgn_files(&args.input)?;
+    let mut pgn_files = collect_pgn_files(&args.input)?;
     if pgn_files.is_empty() {
         return Err(PgnError::Argument(format!(
             "No .pgn files found in {}",
             args.input.display()
         )));
     }
+    pgn_files.sort();
 
     let output_dir = args.output.unwrap_or_else(|| {
         if args.input.is_file() {
@@ -77,42 +77,44 @@ fn main() -> Result<(), PgnError> {
     }
     println!("Output directory: {}", output_dir.display());
 
-    let results: Vec<Result<ProcessedFile, PgnError>> = pgn_files
+    let temp_dir = output_dir.join(".temp");
+    fs::create_dir_all(&temp_dir).map_err(|e| PgnError::io(&temp_dir, e))?;
+
+    let indexed_files: Vec<(usize, &PathBuf)> = pgn_files.iter().enumerate().collect();
+
+    let results: Vec<Result<(usize, ProcessingStats), PgnError>> = indexed_files
         .par_iter()
-        .map(|path| {
+        .map(|(idx, path)| {
             println!("Processing: {}", path.display());
-            process_pgn(path)
+            let worker_dir = temp_dir.join(idx.to_string());
+            let stats = process_pgn_streaming(path, &worker_dir, args.tokenize)?;
+            Ok((*idx, stats))
         })
         .collect();
 
-    let mut all_games = Vec::new();
     let mut total_processed = 0u64;
     let mut total_skipped = 0u64;
     let mut total_filtered = 0u64;
 
-    for result in results {
-        let processed_file = result?;
-        total_processed += processed_file.processed;
-        total_skipped += processed_file.skipped;
-        total_filtered += processed_file.filtered;
-        all_games.extend(processed_file.games);
+    for result in &results {
+        let (_, stats) = result
+            .as_ref()
+            .map_err(|e| PgnError::Parse(e.to_string()))?;
+        total_processed += stats.processed;
+        total_skipped += stats.skipped;
+        total_filtered += stats.filtered;
     }
 
-    let mut writer = TrainingWriter::new(&output_dir, args.tokenize)?;
-    for game in &all_games {
-        writer.write_game(game)?;
-    }
-    writer.flush()?;
+    println!("\nMerging output files...");
+    let output_filenames = TrainingWriter::output_filenames(args.tokenize);
+    merge_temp_files(&temp_dir, &output_dir, &output_filenames, pgn_files.len())?;
+
+    fs::remove_dir_all(&temp_dir).map_err(|e| PgnError::io(&temp_dir, e))?;
 
     println!("\n=== Summary ===");
     println!("Games written:  {total_processed}");
     println!("Games filtered: {total_filtered} (short/incomplete)");
     println!("Games skipped:  {total_skipped} (missing ELO)");
-
-    println!("\nOutput files:");
-    for (bucket, count) in writer.counts() {
-        println!("  {bucket}: {count} games");
-    }
 
     Ok(())
 }
@@ -135,13 +137,17 @@ fn collect_pgn_files(input: &Path) -> Result<Vec<PathBuf>, PgnError> {
     Ok(files)
 }
 
-fn process_pgn(path: &Path) -> Result<ProcessedFile, PgnError> {
+fn process_pgn_streaming(
+    path: &Path,
+    output_dir: &Path,
+    tokenize: bool,
+) -> Result<ProcessingStats, PgnError> {
     let file = File::open(path).map_err(|e| PgnError::io(path, e))?;
     let reader = BufReader::new(file);
     let mut pgn_reader = BufferedReader::new(reader);
 
+    let mut writer = TrainingWriter::new(output_dir, tokenize)?;
     let mut visitor = TrainingVisitor::new();
-    let mut games = Vec::new();
     let mut processed = 0u64;
     let mut skipped = 0u64;
     let mut filtered = 0u64;
@@ -150,7 +156,7 @@ fn process_pgn(path: &Path) -> Result<ProcessedFile, PgnError> {
         match pgn_reader.read_game(&mut visitor) {
             Ok(Some(Some(game))) => {
                 if is_valid_training_game(&game) {
-                    games.push(game);
+                    writer.write_game(&game)?;
                     processed += 1;
                 } else {
                     filtered += 1;
@@ -164,10 +170,43 @@ fn process_pgn(path: &Path) -> Result<ProcessedFile, PgnError> {
         }
     }
 
-    Ok(ProcessedFile {
-        games,
+    writer.flush()?;
+
+    Ok(ProcessingStats {
         processed,
         skipped,
         filtered,
     })
+}
+
+fn merge_temp_files(
+    temp_dir: &Path,
+    output_dir: &Path,
+    filenames: &[String],
+    num_files: usize,
+) -> Result<(), PgnError> {
+    fs::create_dir_all(output_dir).map_err(|e| PgnError::io(output_dir, e))?;
+
+    for filename in filenames {
+        let output_path = output_dir.join(filename);
+        let output_file = File::create(&output_path).map_err(|e| PgnError::io(&output_path, e))?;
+        let mut writer = BufWriter::new(output_file);
+
+        for idx in 0..num_files {
+            let temp_file_path = temp_dir.join(idx.to_string()).join(filename);
+            if temp_file_path.exists() {
+                let file =
+                    File::open(&temp_file_path).map_err(|e| PgnError::io(&temp_file_path, e))?;
+                let reader = BufReader::new(file);
+                for line in reader.lines() {
+                    let line = line.map_err(|e| PgnError::io(&temp_file_path, e))?;
+                    writeln!(writer, "{line}").map_err(|e| PgnError::io(&output_path, e))?;
+                }
+            }
+        }
+
+        writer.flush().map_err(|e| PgnError::io(&output_path, e))?;
+    }
+
+    Ok(())
 }
