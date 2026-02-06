@@ -156,8 +156,11 @@ fn process_pgn_streaming(
         match pgn_reader.read_game(&mut visitor) {
             Ok(Some(Some(game))) => {
                 if is_valid_training_game(&game) {
-                    writer.write_game(&game)?;
-                    processed += 1;
+                    if writer.write_game(&game)? {
+                        processed += 1;
+                    } else {
+                        filtered += 1;
+                    }
                 } else {
                     filtered += 1;
                 }

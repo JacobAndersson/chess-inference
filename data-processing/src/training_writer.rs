@@ -8,7 +8,7 @@ use crate::tokenizer::ChessTokenizer;
 use crate::training_visitor::TrainingGameData;
 
 const ELO_BUCKETS: &[u16] = &[1200, 1500, 1800, 2000, 2500];
-const MAX_GAME_LENGTH: usize = 2048;
+const MAX_GAME_LENGTH: usize = 8192;
 const TEST_SPLIT_MODULO: u64 = 20; // Every 20th game goes to test (5%)
 
 pub struct TrainingWriter {
@@ -82,11 +82,16 @@ impl TrainingWriter {
         filenames
     }
 
-    pub fn write_game(&mut self, game: &TrainingGameData) -> Result<(), PgnError> {
+    /// Write a game to the appropriate bucket files.
+    /// Returns Ok(true) if written, Ok(false) if skipped (e.g. too long to tokenize).
+    pub fn write_game(&mut self, game: &TrainingGameData) -> Result<bool, PgnError> {
         let line = game.moves.join(" ");
 
         let formatted = if self.tokenize {
-            self.tokenize_game(&line)?
+            match self.tokenize_game(&line) {
+                Some(tokens) => tokens,
+                None => return Ok(false),
+            }
         } else {
             line
         };
@@ -108,19 +113,18 @@ impl TrainingWriter {
         let all_filename = Self::all_filename(split, self.tokenize);
         self.write_to_bucket(&all_filename, &formatted)?;
 
-        Ok(())
+        Ok(true)
     }
 
-    fn tokenize_game(&mut self, moves: &str) -> Result<String, PgnError> {
-        let len = ChessTokenizer::encode_with_eos(moves, &mut self.token_buffer)
-            .ok_or_else(|| PgnError::Parse(format!("Failed to tokenize game: {moves}")))?;
+    fn tokenize_game(&mut self, moves: &str) -> Option<String> {
+        let len = ChessTokenizer::encode_with_eos(moves, &mut self.token_buffer)?;
 
         let token_strings: Vec<String> = self.token_buffer[..len]
             .iter()
             .map(|t| t.to_string())
             .collect();
 
-        Ok(token_strings.join(","))
+        Some(token_strings.join(","))
     }
 
     fn write_to_bucket(&mut self, bucket: &str, line: &str) -> Result<(), PgnError> {
@@ -345,5 +349,32 @@ mod tests {
 
         let decoded = ChessTokenizer::decode(&tokens);
         assert_eq!(decoded, "e4 e5 O-O");
+    }
+
+    #[test]
+    fn test_very_long_game_skipped_in_tokenize_mode() {
+        let dir = tempdir().expect("create tempdir");
+        let mut writer = TrainingWriter::new(dir.path(), true).expect("create writer");
+
+        // Create a game with enough moves to exceed MAX_GAME_LENGTH
+        let moves: Vec<String> = (0..3000).map(|_| "Nf3".to_string()).collect();
+        let game = TrainingGameData {
+            avg_elo: 1500,
+            moves,
+            result: GameResult::Draw,
+        };
+
+        let written = writer.write_game(&game).expect("should not error");
+        assert!(!written, "overly long game should be skipped, not written");
+    }
+
+    #[test]
+    fn test_write_game_returns_true_for_normal_game() {
+        let dir = tempdir().expect("create tempdir");
+        let mut writer = TrainingWriter::new(dir.path(), true).expect("create writer");
+
+        let game = make_game(1100);
+        let written = writer.write_game(&game).expect("write game");
+        assert!(written);
     }
 }
