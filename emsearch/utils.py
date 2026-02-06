@@ -1,8 +1,10 @@
 """Utility functions for training."""
 
 import json
+import logging
 import random
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +12,36 @@ import torch
 from torch import nn
 
 from emsearch.config import ExperimentConfig
+
+logger = logging.getLogger("emsearch")
+
+
+def setup_logging(run_name: str, log_dir: str = "logs") -> Path:
+    """Setup logging to both console and a file in log_dir.
+
+    Returns the path to the log file.
+    """
+    log_path = Path(log_dir)
+    log_path.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")  # noqa: UP017
+    log_file = log_path / f"{run_name}_{timestamp}.log"
+
+    root = logging.getLogger("emsearch")
+    root.setLevel(logging.INFO)
+    root.handlers.clear()
+
+    fmt = logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    fh = logging.FileHandler(log_file)
+    fh.setFormatter(fmt)
+    root.addHandler(fh)
+
+    ch = logging.StreamHandler()
+    ch.setFormatter(fmt)
+    root.addHandler(ch)
+
+    return log_file
 
 
 def set_seed(seed: int) -> None:
@@ -130,7 +162,7 @@ def log_metrics(metrics: dict, step: int, use_wandb: bool) -> None:
         wandb.log(metrics, step=step)
 
     parts = [f"{k}={v:.4f}" if isinstance(v, float) else f"{k}={v}" for k, v in metrics.items()]
-    print(f"[step {step}] {' | '.join(parts)}")
+    logger.info("[step %d] %s", step, " | ".join(parts))
 
 
 def save_config(path: Path, config: ExperimentConfig) -> None:

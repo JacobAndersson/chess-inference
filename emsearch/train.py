@@ -1,6 +1,7 @@
 """Main training loop for chess transformer."""
 
 import argparse
+import logging
 import time
 from pathlib import Path
 
@@ -19,8 +20,11 @@ from emsearch.utils import (
     save_checkpoint,
     save_config,
     set_seed,
+    setup_logging,
     setup_wandb,
 )
+
+logger = logging.getLogger("emsearch")
 
 
 def compute_loss(
@@ -103,7 +107,7 @@ def run_validation(
 def _setup_model(config: ExperimentConfig, device: torch.device) -> ChessTransformer:
     """Initialize and optionally compile the model."""
     model = ChessTransformer(config.model).to(device)
-    print(f"Model parameters: {model.count_parameters():,}")
+    logger.info("Model parameters: %s", f"{model.count_parameters():,}")
 
     if config.compile and hasattr(torch, "compile"):
         model = torch.compile(model)
@@ -146,9 +150,17 @@ def _run_training_step(
     return data_iter, accum_loss, total_tokens
 
 
-def train(config: ExperimentConfig) -> None:
+def train(config: ExperimentConfig, run_name: str | None = None) -> None:
     """Main training function."""
     set_seed(config.seed)
+
+    if run_name is None:
+        run_name = f"elo{config.training.elo_bucket}"
+
+    log_file = setup_logging(run_name)
+    logger.info("Run: %s", run_name)
+    logger.info("Log file: %s", log_file)
+    logger.info("Config: %s", config)
 
     device = torch.device(config.device)
     data_dir = Path(config.training.data_dir)
@@ -159,9 +171,7 @@ def train(config: ExperimentConfig) -> None:
         model, config.training.learning_rate, config.training.weight_decay
     )
     scheduler = get_lr_scheduler(optimizer, config.training.warmup_steps, config.training.max_steps)
-    use_wandb = setup_wandb(
-        config.training.wandb_project, config, f"elo{config.training.elo_bucket}_preset"
-    )
+    use_wandb = setup_wandb(config.training.wandb_project, config, run_name)
 
     save_config(checkpoint_dir / "config.json", config)
 
@@ -228,7 +238,7 @@ def train(config: ExperimentConfig) -> None:
 
     pbar.close()
     save_checkpoint(checkpoint_dir / "final.pt", model, optimizer, scheduler, config, step, 0.0)
-    print(f"Training complete. Checkpoints saved to {checkpoint_dir}")
+    logger.info("Training complete. Checkpoints saved to %s", checkpoint_dir)
 
 
 def main() -> None:
@@ -251,6 +261,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--no-compile", action="store_true")
+    parser.add_argument("--run-name", type=str, default=None, help="Name for this run")
     args = parser.parse_args()
 
     model_config = get_preset(args.preset)
@@ -279,7 +290,7 @@ def main() -> None:
         compile=not args.no_compile,
     )
 
-    train(config)
+    train(config, run_name=args.run_name)
 
 
 if __name__ == "__main__":
