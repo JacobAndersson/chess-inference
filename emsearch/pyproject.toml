@@ -10,6 +10,7 @@ dependencies = [
     "wandb>=0.18.0",
     "tqdm>=4.66.0",
     "numpy>=1.24.0",
+    "chess>=1.10.0",
 ]
 
 # Ruff configuration - mirrors ESLint strict rules
