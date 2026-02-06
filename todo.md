@@ -23,4 +23,3 @@
 
 - [ ] **Multi-worker data loading**: DataLoader defaults to num_workers=0, meaning data loading blocks the main training thread. With proper IterableDataset worker sharding (or a map-style dataset), adding workers would overlap data loading with GPU compute.
 
-- [ ] **KV-cache for generation**: The generate() method recomputes the full sequence from scratch at every token step. Adding a KV-cache would make Stockfish evaluation and inference significantly faster, especially for long games.
