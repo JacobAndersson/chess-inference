@@ -263,7 +263,8 @@ def main() -> None:
     parser.add_argument("--save-every", type=int, default=5000)
     parser.add_argument("--eval-every", type=int, default=1000)
     parser.add_argument("--log-every", type=int, default=100)
-    parser.add_argument("--wandb-project", type=str, default=None)
+    parser.add_argument("--wandb-project", type=str, default="chess-transformer")
+    parser.add_argument("--no-wandb", action="store_true", help="Disable wandb logging")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--no-compile", action="store_true")
@@ -285,7 +286,7 @@ def main() -> None:
         save_every=args.save_every,
         eval_every=args.eval_every,
         log_every=args.log_every,
-        wandb_project=args.wandb_project,
+        wandb_project=None if args.no_wandb else args.wandb_project,
     )
 
     config = ExperimentConfig(
