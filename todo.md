@@ -1,0 +1,6 @@
+- [x] Setup logging infra so that logs are saved to ./logs for each training run.
+- [x] Setup better test logging. I want to measure move accuracy bucketed by start, middle and endgame.
+- [x] default to always use wandb
+- [x] setup model snapshotting so that we can test models at different steps.
+- [x] Perform hparam sweep on 5M model, varying the datasetsize, elobuckets to get preliminary results, learning rate and schedule.
+- [x] setup test suite to let the model play agains stockfish at different elo levels to test its ability.
