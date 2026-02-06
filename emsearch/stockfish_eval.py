@@ -10,6 +10,7 @@ import torch
 
 from emsearch.chess_dataset import ENCODE_MAP, EOS_TOKEN, PAD_TOKEN, decode
 from emsearch.eval_checkpoint import load_model_from_checkpoint
+from emsearch.glicko2 import rate_from_stockfish_results
 from emsearch.model import ChessTransformer
 from emsearch.utils import setup_logging
 
@@ -96,11 +97,10 @@ def play_game(
             move = _extract_model_move(model, context_tokens, device, board)
             if move is None:
                 illegal_moves += 1
-                if illegal_moves >= 3:
+                if illegal_moves >= 5:
                     result_reason = "illegal_moves"
                     break
-                # Pick a random legal move as fallback
-                move = next(iter(board.legal_moves))
+                continue
         else:
             sf_result = engine.play(board, chess.engine.Limit(time=0.1))
             move = sf_result.move
@@ -152,7 +152,7 @@ def run_stockfish_suite(
     Plays games at each ELO level with the model as both white and black.
     """
     if elo_levels is None:
-        elo_levels = [1350, 1500, 1800, 2000, 2200]
+        elo_levels = [1350, 1500, 1800, 2000, 2500]
 
     model.eval()
     results = {}
@@ -212,7 +212,7 @@ def main() -> None:
         "--elo-levels",
         type=int,
         nargs="+",
-        default=[1350, 1500, 1800, 2000, 2200],
+        default=[1350, 1500, 1800, 2000, 2500],
     )
     parser.add_argument("--games-per-level", type=int, default=10)
     parser.add_argument("--device", type=str, default="cuda")
@@ -229,7 +229,9 @@ def main() -> None:
         model, device, args.stockfish, args.elo_levels, args.games_per_level
     )
 
+    rating, rd, _ = rate_from_stockfish_results(results)
     logger.info("=== Final Results ===")
+    logger.info("Glicko-2 rating: %.0f (RD=%.0f)", rating, rd)
     for elo, data in sorted(results.items()):
         logger.info(
             "  ELO %4d: W=%.0f%% D=%.0f%% L=%.0f%%",

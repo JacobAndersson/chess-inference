@@ -35,25 +35,31 @@ def compute_loss(
 ) -> torch.Tensor:
     """Compute cross-entropy loss on a batch."""
     input_ids = batch["input_ids"].to(device)
-    attention_mask = batch["attention_mask"].to(device)
+    attention_mask = batch.get("attention_mask")
 
-    logits = model(input_ids, attention_mask)
+    logits = model(input_ids)
 
     # Shift for next-token prediction
     shift_logits = logits[:, :-1, :].contiguous()
     shift_labels = input_ids[:, 1:].contiguous()
-    shift_mask = attention_mask[:, 1:].contiguous()
 
-    loss = fn.cross_entropy(
+    if attention_mask is not None:
+        attention_mask = attention_mask.to(device)
+        shift_mask = attention_mask[:, 1:].contiguous()
+        loss = fn.cross_entropy(
+            shift_logits.view(-1, shift_logits.size(-1)),
+            shift_labels.view(-1),
+            ignore_index=PAD_TOKEN,
+            reduction="none",
+        )
+        loss = loss.view(shift_labels.shape)
+        return (loss * shift_mask).sum() / shift_mask.sum()
+
+    # Packed mode: no padding, use simple mean
+    return fn.cross_entropy(
         shift_logits.view(-1, shift_logits.size(-1)),
         shift_labels.view(-1),
-        ignore_index=PAD_TOKEN,
-        reduction="none",
     )
-
-    # Mask out padding and compute mean
-    loss = loss.view(shift_labels.shape)
-    return (loss * shift_mask).sum() / shift_mask.sum()
 
 
 @torch.no_grad()
@@ -73,6 +79,7 @@ def run_validation(
         batch_size=batch_size,
         max_seq_len=model.config.max_seq_len,
         split="test",
+        shuffle_buffer_size=0,
     )
 
     total_loss = 0.0
@@ -83,23 +90,30 @@ def run_validation(
             break
 
         input_ids = batch["input_ids"].to(device)
-        attention_mask = batch["attention_mask"].to(device)
-
-        logits = model(input_ids, attention_mask)
+        logits = model(input_ids)
         shift_logits = logits[:, :-1, :].contiguous()
         shift_labels = input_ids[:, 1:].contiguous()
-        shift_mask = attention_mask[:, 1:].contiguous()
 
-        loss = fn.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),
-            shift_labels.view(-1),
-            ignore_index=PAD_TOKEN,
-            reduction="none",
-        )
-        loss = loss.view(shift_labels.shape)
-
-        total_loss += (loss * shift_mask).sum().item()
-        total_tokens += shift_mask.sum().item()
+        attention_mask = batch.get("attention_mask")
+        if attention_mask is not None:
+            shift_mask = attention_mask[:, 1:].to(device).contiguous()
+            loss = fn.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+                ignore_index=PAD_TOKEN,
+                reduction="none",
+            )
+            loss = loss.view(shift_labels.shape)
+            total_loss += (loss * shift_mask).sum().item()
+            total_tokens += shift_mask.sum().item()
+        else:
+            loss = fn.cross_entropy(
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+                reduction="none",
+            )
+            total_loss += loss.sum().item()
+            total_tokens += loss.numel()
 
     model.train()
     return total_loss / total_tokens if total_tokens > 0 else float("inf")
@@ -143,7 +157,10 @@ def _run_training_step(
 
         loss.backward()
         accum_loss += loss.item() * grad_accum_steps
-        total_tokens += batch["attention_mask"].sum().item()
+        if "attention_mask" in batch:
+            total_tokens += batch["attention_mask"].sum().item()
+        else:
+            total_tokens += batch["input_ids"].numel()
 
     torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
     optimizer.step()
@@ -171,7 +188,13 @@ def train(config: ExperimentConfig, run_name: str | None = None) -> None:
     optimizer = configure_optimizer(
         model, config.training.learning_rate, config.training.weight_decay
     )
-    scheduler = get_lr_scheduler(optimizer, config.training.warmup_steps, config.training.max_steps)
+    scheduler = get_lr_scheduler(
+        optimizer,
+        config.training.warmup_steps,
+        config.training.max_steps,
+        min_lr=config.training.min_lr,
+        learning_rate=config.training.learning_rate,
+    )
     use_wandb = setup_wandb(config.training.wandb_project, config, run_name)
 
     save_config(checkpoint_dir / "config.json", config)
@@ -258,7 +281,7 @@ def main() -> None:
     parser.add_argument("--gradient-accumulation-steps", type=int, default=1)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--max-steps", type=int, default=100_000)
-    parser.add_argument("--warmup-steps", type=int, default=1000)
+    parser.add_argument("--warmup-steps", type=int, default=2000)
     parser.add_argument("--checkpoint-dir", type=str, default="checkpoints")
     parser.add_argument("--save-every", type=int, default=5000)
     parser.add_argument("--eval-every", type=int, default=1000)

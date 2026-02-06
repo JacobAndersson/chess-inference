@@ -1,5 +1,7 @@
 """GPT-2 style decoder-only transformer for chess move prediction."""
 
+import math
+
 import torch
 from torch import nn
 from torch.nn import functional as fn
@@ -17,8 +19,8 @@ class CausalSelfAttention(nn.Module):
         self.n_heads = config.n_heads
         self.head_dim = config.d_model // config.n_heads
 
-        self.qkv = nn.Linear(config.d_model, 3 * config.d_model)
-        self.proj = nn.Linear(config.d_model, config.d_model)
+        self.qkv = nn.Linear(config.d_model, 3 * config.d_model, bias=config.bias)
+        self.proj = nn.Linear(config.d_model, config.d_model, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -43,14 +45,33 @@ class MLP(nn.Module):
 
     def __init__(self, config: ModelConfig) -> None:
         super().__init__()
-        self.fc1 = nn.Linear(config.d_model, 4 * config.d_model)
-        self.fc2 = nn.Linear(4 * config.d_model, config.d_model)
+        self.fc1 = nn.Linear(config.d_model, 4 * config.d_model, bias=config.bias)
+        self.fc2 = nn.Linear(4 * config.d_model, config.d_model, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply MLP with GELU activation."""
         x = fn.gelu(self.fc1(x))
         return self.dropout(self.fc2(x))
+
+
+class SwiGLUMLP(nn.Module):
+    """Feed-forward network with SwiGLU activation."""
+
+    def __init__(self, config: ModelConfig) -> None:
+        super().__init__()
+        # 8/3 expansion, rounded to nearest multiple of 256 for efficiency
+        hidden_dim = int(8 * config.d_model / 3)
+        hidden_dim = ((hidden_dim + 255) // 256) * 256
+
+        self.gate = nn.Linear(config.d_model, hidden_dim, bias=config.bias)
+        self.up = nn.Linear(config.d_model, hidden_dim, bias=config.bias)
+        self.down = nn.Linear(hidden_dim, config.d_model, bias=config.bias)
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Apply SwiGLU: down(silu(gate(x)) * up(x))."""
+        return self.dropout(self.down(fn.silu(self.gate(x)) * self.up(x)))
 
 
 class TransformerBlock(nn.Module):
@@ -61,7 +82,7 @@ class TransformerBlock(nn.Module):
         self.ln1 = nn.LayerNorm(config.d_model)
         self.attn = CausalSelfAttention(config)
         self.ln2 = nn.LayerNorm(config.d_model)
-        self.mlp = MLP(config)
+        self.mlp = SwiGLUMLP(config) if config.use_swiglu else MLP(config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Apply transformer block with residual connections."""
@@ -90,6 +111,8 @@ class ChessTransformer(nn.Module):
         self._init_weights()
 
     def _init_weights(self) -> None:
+        residual_std = 0.02 / math.sqrt(2 * self.config.n_layers)
+
         for module in self.modules():
             if isinstance(module, nn.Linear):
                 torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
@@ -97,6 +120,14 @@ class ChessTransformer(nn.Module):
                     torch.nn.init.zeros_(module.bias)
             elif isinstance(module, nn.Embedding):
                 torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+
+        # Scale residual projections (attn proj and MLP output)
+        for block in self.blocks:
+            torch.nn.init.normal_(block.attn.proj.weight, mean=0.0, std=residual_std)
+            if isinstance(block.mlp, SwiGLUMLP):
+                torch.nn.init.normal_(block.mlp.down.weight, mean=0.0, std=residual_std)
+            else:
+                torch.nn.init.normal_(block.mlp.fc2.weight, mean=0.0, std=residual_std)
 
     def forward(
         self,
@@ -167,7 +198,11 @@ def estimate_params(config: ModelConfig) -> int:
 
     embed_params = v * d + s * d
     attn_params = 4 * d * d
-    mlp_params = 8 * d * d
+    if config.use_swiglu:
+        hidden_dim = ((int(8 * d / 3) + 255) // 256) * 256
+        mlp_params = 3 * d * hidden_dim
+    else:
+        mlp_params = 8 * d * d
     ln_params = 4 * d
     block_params = attn_params + mlp_params + ln_params
 

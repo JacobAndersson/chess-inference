@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use data_processing::error::PgnError;
 use data_processing::filters::is_valid_training_game;
 use data_processing::training_visitor::TrainingVisitor;
-use data_processing::training_writer::TrainingWriter;
+use data_processing::training_writer::{OutputFormat, TrainingWriter};
 
 #[derive(Parser)]
 #[command(name = "extract-training")]
@@ -29,6 +29,10 @@ struct Args {
     /// Output tokenized format (comma-separated token IDs) instead of SAN moves
     #[arg(long, default_value = "false")]
     tokenize: bool,
+
+    /// Output binary format (raw bytes, one byte per token) for fast loading
+    #[arg(long, default_value = "false")]
+    binary: bool,
 }
 
 struct ProcessingStats {
@@ -72,7 +76,17 @@ fn main() -> Result<(), PgnError> {
         "Using {} worker threads",
         args.num_workers.unwrap_or_else(rayon::current_num_threads)
     );
-    if args.tokenize {
+    let format = if args.binary {
+        OutputFormat::Binary
+    } else if args.tokenize {
+        OutputFormat::Tokenized
+    } else {
+        OutputFormat::Text
+    };
+
+    if args.binary {
+        println!("Binary output mode enabled");
+    } else if args.tokenize {
         println!("Tokenization mode enabled");
     }
     println!("Output directory: {}", output_dir.display());
@@ -87,7 +101,7 @@ fn main() -> Result<(), PgnError> {
         .map(|(idx, path)| {
             println!("Processing: {}", path.display());
             let worker_dir = temp_dir.join(idx.to_string());
-            let stats = process_pgn_streaming(path, &worker_dir, args.tokenize)?;
+            let stats = process_pgn_streaming(path, &worker_dir, format)?;
             Ok((*idx, stats))
         })
         .collect();
@@ -106,8 +120,14 @@ fn main() -> Result<(), PgnError> {
     }
 
     println!("\nMerging output files...");
-    let output_filenames = TrainingWriter::output_filenames(args.tokenize);
-    merge_temp_files(&temp_dir, &output_dir, &output_filenames, pgn_files.len())?;
+    let output_filenames = TrainingWriter::output_filenames_for_format(format);
+    merge_temp_files(
+        &temp_dir,
+        &output_dir,
+        &output_filenames,
+        pgn_files.len(),
+        format,
+    )?;
 
     fs::remove_dir_all(&temp_dir).map_err(|e| PgnError::io(&temp_dir, e))?;
 
@@ -140,13 +160,13 @@ fn collect_pgn_files(input: &Path) -> Result<Vec<PathBuf>, PgnError> {
 fn process_pgn_streaming(
     path: &Path,
     output_dir: &Path,
-    tokenize: bool,
+    format: OutputFormat,
 ) -> Result<ProcessingStats, PgnError> {
     let file = File::open(path).map_err(|e| PgnError::io(path, e))?;
     let reader = BufReader::new(file);
     let mut pgn_reader = BufferedReader::new(reader);
 
-    let mut writer = TrainingWriter::new(output_dir, tokenize)?;
+    let mut writer = TrainingWriter::with_format(output_dir, format)?;
     let mut visitor = TrainingVisitor::new();
     let mut processed = 0u64;
     let mut skipped = 0u64;
@@ -182,11 +202,13 @@ fn process_pgn_streaming(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn merge_temp_files(
     temp_dir: &Path,
     output_dir: &Path,
     filenames: &[String],
     num_files: usize,
+    format: OutputFormat,
 ) -> Result<(), PgnError> {
     fs::create_dir_all(output_dir).map_err(|e| PgnError::io(output_dir, e))?;
 
@@ -198,12 +220,20 @@ fn merge_temp_files(
         for idx in 0..num_files {
             let temp_file_path = temp_dir.join(idx.to_string()).join(filename);
             if temp_file_path.exists() {
-                let file =
-                    File::open(&temp_file_path).map_err(|e| PgnError::io(&temp_file_path, e))?;
-                let reader = BufReader::new(file);
-                for line in reader.lines() {
-                    let line = line.map_err(|e| PgnError::io(&temp_file_path, e))?;
-                    writeln!(writer, "{line}").map_err(|e| PgnError::io(&output_path, e))?;
+                if format == OutputFormat::Binary {
+                    let content =
+                        fs::read(&temp_file_path).map_err(|e| PgnError::io(&temp_file_path, e))?;
+                    writer
+                        .write_all(&content)
+                        .map_err(|e| PgnError::io(&output_path, e))?;
+                } else {
+                    let file = File::open(&temp_file_path)
+                        .map_err(|e| PgnError::io(&temp_file_path, e))?;
+                    let reader = BufReader::new(file);
+                    for line in reader.lines() {
+                        let line = line.map_err(|e| PgnError::io(&temp_file_path, e))?;
+                        writeln!(writer, "{line}").map_err(|e| PgnError::io(&output_path, e))?;
+                    }
                 }
             }
         }

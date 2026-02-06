@@ -12,7 +12,9 @@ class ModelConfig:
     d_model: int = 256
     n_heads: int = 4
     n_layers: int = 6
-    dropout: float = 0.1
+    dropout: float = 0.0
+    bias: bool = False
+    use_swiglu: bool = True
 
 
 @dataclass
@@ -26,12 +28,13 @@ class TrainingConfig:
     gradient_accumulation_steps: int = 1
     learning_rate: float = 3e-4
     weight_decay: float = 0.1
-    warmup_steps: int = 1000
+    warmup_steps: int = 2000
     max_steps: int = 100_000
     checkpoint_dir: str = "checkpoints"
     save_every: int = 5000
     eval_every: int = 1000
     log_every: int = 100
+    min_lr: float = 3e-5
     wandb_project: str | None = None
 
 

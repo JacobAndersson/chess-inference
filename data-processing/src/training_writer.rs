@@ -11,16 +11,32 @@ const ELO_BUCKETS: &[u16] = &[1200, 1500, 1800, 2000, 2500];
 const MAX_GAME_LENGTH: usize = 8192;
 const TEST_SPLIT_MODULO: u64 = 20; // Every 20th game goes to test (5%)
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputFormat {
+    Text,
+    Tokenized,
+    Binary,
+}
+
 pub struct TrainingWriter {
     writers: HashMap<String, BufWriter<File>>,
     counts: HashMap<String, u64>,
-    tokenize: bool,
+    format: OutputFormat,
     token_buffer: Vec<u8>,
     game_counter: u64,
 }
 
 impl TrainingWriter {
     pub fn new(output_dir: &Path, tokenize: bool) -> Result<Self, PgnError> {
+        let format = if tokenize {
+            OutputFormat::Tokenized
+        } else {
+            OutputFormat::Text
+        };
+        Self::with_format(output_dir, format)
+    }
+
+    pub fn with_format(output_dir: &Path, format: OutputFormat) -> Result<Self, PgnError> {
         fs::create_dir_all(output_dir).map_err(|e| PgnError::io(output_dir, e))?;
 
         let mut writers = HashMap::new();
@@ -28,7 +44,7 @@ impl TrainingWriter {
 
         for elo in ELO_BUCKETS {
             for split in ["train", "test"] {
-                let filename = Self::filename(*elo, split, tokenize);
+                let filename = Self::filename(*elo, split, format);
                 let path = output_dir.join(&filename);
                 let file = File::create(&path).map_err(|e| PgnError::io(&path, e))?;
                 writers.insert(filename.clone(), BufWriter::new(file));
@@ -37,7 +53,7 @@ impl TrainingWriter {
         }
 
         for split in ["train", "test"] {
-            let filename = Self::all_filename(split, tokenize);
+            let filename = Self::all_filename(split, format);
             let path = output_dir.join(&filename);
             let file = File::create(&path).map_err(|e| PgnError::io(&path, e))?;
             writers.insert(filename.clone(), BufWriter::new(file));
@@ -47,37 +63,46 @@ impl TrainingWriter {
         Ok(Self {
             writers,
             counts,
-            tokenize,
+            format,
             token_buffer: vec![0u8; MAX_GAME_LENGTH],
             game_counter: 0,
         })
     }
 
-    fn filename(elo: u16, split: &str, tokenize: bool) -> String {
-        if tokenize {
-            format!("tokens_elo_{elo}_{split}.txt")
-        } else {
-            format!("elo_{elo}_{split}.txt")
+    fn filename(elo: u16, split: &str, format: OutputFormat) -> String {
+        match format {
+            OutputFormat::Binary => format!("tokens_elo_{elo}_{split}.bin"),
+            OutputFormat::Tokenized => format!("tokens_elo_{elo}_{split}.txt"),
+            OutputFormat::Text => format!("elo_{elo}_{split}.txt"),
         }
     }
 
-    fn all_filename(split: &str, tokenize: bool) -> String {
-        if tokenize {
-            format!("tokens_elo_all_{split}.txt")
-        } else {
-            format!("elo_all_{split}.txt")
+    fn all_filename(split: &str, format: OutputFormat) -> String {
+        match format {
+            OutputFormat::Binary => format!("tokens_elo_all_{split}.bin"),
+            OutputFormat::Tokenized => format!("tokens_elo_all_{split}.txt"),
+            OutputFormat::Text => format!("elo_all_{split}.txt"),
         }
     }
 
     pub fn output_filenames(tokenize: bool) -> Vec<String> {
+        let format = if tokenize {
+            OutputFormat::Tokenized
+        } else {
+            OutputFormat::Text
+        };
+        Self::output_filenames_for_format(format)
+    }
+
+    pub fn output_filenames_for_format(format: OutputFormat) -> Vec<String> {
         let mut filenames = Vec::new();
         for elo in ELO_BUCKETS {
             for split in ["train", "test"] {
-                filenames.push(Self::filename(*elo, split, tokenize));
+                filenames.push(Self::filename(*elo, split, format));
             }
         }
         for split in ["train", "test"] {
-            filenames.push(Self::all_filename(split, tokenize));
+            filenames.push(Self::all_filename(split, format));
         }
         filenames
     }
@@ -87,15 +112,6 @@ impl TrainingWriter {
     pub fn write_game(&mut self, game: &TrainingGameData) -> Result<bool, PgnError> {
         let line = game.moves.join(" ");
 
-        let formatted = if self.tokenize {
-            match self.tokenize_game(&line) {
-                Some(tokens) => tokens,
-                None => return Ok(false),
-            }
-        } else {
-            line
-        };
-
         let split = if self.game_counter.is_multiple_of(TEST_SPLIT_MODULO) {
             "test"
         } else {
@@ -103,15 +119,47 @@ impl TrainingWriter {
         };
         self.game_counter += 1;
 
-        for elo in ELO_BUCKETS {
-            if game.avg_elo < *elo {
-                let filename = Self::filename(*elo, split, self.tokenize);
-                self.write_to_bucket(&filename, &formatted)?;
-            }
+        match self.format {
+            OutputFormat::Text => {
+                for elo in ELO_BUCKETS {
+                    if game.avg_elo < *elo {
+                        let filename = Self::filename(*elo, split, self.format);
+                        self.write_text_line(&filename, &line)?;
+                    }
+                }
+                let all_filename = Self::all_filename(split, self.format);
+                self.write_text_line(&all_filename, &line)?;
+            },
+            OutputFormat::Tokenized => {
+                let Some(formatted) = self.tokenize_game(&line) else {
+                    return Ok(false);
+                };
+                for elo in ELO_BUCKETS {
+                    if game.avg_elo < *elo {
+                        let filename = Self::filename(*elo, split, self.format);
+                        self.write_text_line(&filename, &formatted)?;
+                    }
+                }
+                let all_filename = Self::all_filename(split, self.format);
+                self.write_text_line(&all_filename, &formatted)?;
+            },
+            OutputFormat::Binary => {
+                let Some(len) =
+                    ChessTokenizer::encode_with_eos(&line, &mut self.token_buffer)
+                else {
+                    return Ok(false);
+                };
+                let bytes = self.token_buffer[..len].to_vec();
+                for elo in ELO_BUCKETS {
+                    if game.avg_elo < *elo {
+                        let filename = Self::filename(*elo, split, self.format);
+                        self.write_binary(&filename, &bytes)?;
+                    }
+                }
+                let all_filename = Self::all_filename(split, self.format);
+                self.write_binary(&all_filename, &bytes)?;
+            },
         }
-
-        let all_filename = Self::all_filename(split, self.tokenize);
-        self.write_to_bucket(&all_filename, &formatted)?;
 
         Ok(true)
     }
@@ -127,9 +175,19 @@ impl TrainingWriter {
         Some(token_strings.join(","))
     }
 
-    fn write_to_bucket(&mut self, bucket: &str, line: &str) -> Result<(), PgnError> {
+    fn write_text_line(&mut self, bucket: &str, line: &str) -> Result<(), PgnError> {
         if let Some(writer) = self.writers.get_mut(bucket) {
             writeln!(writer, "{line}").map_err(|e| PgnError::Parse(e.to_string()))?;
+            *self.counts.entry(bucket.to_string()).or_insert(0) += 1;
+        }
+        Ok(())
+    }
+
+    fn write_binary(&mut self, bucket: &str, bytes: &[u8]) -> Result<(), PgnError> {
+        if let Some(writer) = self.writers.get_mut(bucket) {
+            writer
+                .write_all(bytes)
+                .map_err(|e| PgnError::Parse(e.to_string()))?;
             *self.counts.entry(bucket.to_string()).or_insert(0) += 1;
         }
         Ok(())

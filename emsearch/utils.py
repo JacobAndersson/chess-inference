@@ -82,14 +82,18 @@ def get_lr_scheduler(
     optimizer: torch.optim.Optimizer,
     warmup_steps: int,
     max_steps: int,
+    min_lr: float = 3e-5,
+    learning_rate: float = 3e-4,
 ) -> torch.optim.lr_scheduler.LambdaLR:
-    """Create cosine LR scheduler with linear warmup."""
+    """Create cosine LR scheduler with linear warmup and minimum LR."""
+    min_ratio = min_lr / learning_rate if learning_rate > 0 else 0.0
 
     def lr_lambda(step: int) -> float:
         if step < warmup_steps:
             return step / warmup_steps
         progress = (step - warmup_steps) / (max_steps - warmup_steps)
-        return 0.5 * (1.0 + np.cos(np.pi * progress))
+        cosine_decay = 0.5 * (1.0 + np.cos(np.pi * progress))
+        return min_ratio + (1.0 - min_ratio) * cosine_decay
 
     return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 

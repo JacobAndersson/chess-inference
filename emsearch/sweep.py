@@ -94,11 +94,13 @@ def main() -> None:
     if args.dry_run:
         for run_name, config in configs:
             logger.info("  %s", run_name)
-            logger.info("    lr=%s elo=%s games=%s warmup=%d",
-                        config.training.learning_rate,
-                        config.training.elo_bucket,
-                        config.training.max_games,
-                        config.training.warmup_steps)
+            logger.info(
+                "    lr=%s elo=%s games=%s warmup=%d",
+                config.training.learning_rate,
+                config.training.elo_bucket,
+                config.training.max_games,
+                config.training.warmup_steps,
+            )
         return
 
     for i, (run_name, config) in enumerate(configs):

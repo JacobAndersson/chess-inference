@@ -7,30 +7,38 @@
 
 ## Match paper (Transcendence, arXiv 2406.11741)
 
-- [ ] **Game packing (concatenate games into fixed-length blocks)**: The paper concatenates multiple games into fixed-size blocks of 1023 tokens, separated by ";" delimiters. No padding is used — every token in a batch is meaningful. Our current approach pads each game individually, wasting compute on padding tokens. Need to: add ";" to the vocabulary (vocab 33), implement a streaming block packer that concatenates games until the block is full, and remove padding/attention-mask logic from the dataloader.
+- [x] **Game packing (concatenate games into fixed-length blocks)**: Added `PackedChessDataset` that concatenates games into fixed-size blocks (default 1023 tokens). No padding used. Configurable via `packed=True` in `create_dataloader`.
 
-- [ ] **Dropout = 0.0**: The paper uses no dropout at all. We default to 0.1. Change the default and ensure the 50M preset uses dropout=0.0.
+- [x] **Dropout = 0.0**: Changed default to 0.0 in `ModelConfig`.
 
-- [ ] **Disable bias in linear layers**: The paper sets bias=False on all linear layers. We currently have bias enabled everywhere. Add a `bias` flag to ModelConfig and wire it through attention, MLP, and the output head.
+- [x] **Disable bias in linear layers**: Added `bias` flag to `ModelConfig` (default `False`). Wired through attention (qkv, proj), MLP (fc1/fc2 or gate/up/down), output head already had bias=False.
 
-- [ ] **Residual path scaling**: The paper scales residual projection weights by `0.02 / sqrt(2 * n_layers)` during initialization, matching the GPT-2 approach. We initialize everything at std=0.02. Fix `_init_weights` to apply this scaling to the `proj` layer in attention and `fc2` in MLP.
+- [x] **Residual path scaling**: `_init_weights` now scales attn `proj` and MLP output layer (`fc2`/`down`) by `0.02 / sqrt(2 * n_layers)`.
 
-- [ ] **Cosine schedule minimum LR**: The paper uses min_lr = 3e-5 (10% of peak lr=3e-4). Our schedule decays to 0.0. Add a `min_lr` parameter to TrainingConfig and the LR lambda.
+- [x] **Cosine schedule minimum LR**: Added `min_lr` parameter to `TrainingConfig` (default 3e-5 = 10% of peak). LR lambda now decays to `min_lr` instead of 0.
 
-- [ ] **Warmup steps = 2000**: The paper's 50M config uses 2000 warmup steps. Our default is 1000. Update the default.
+- [x] **Warmup steps = 2000**: Updated default from 1000 to 2000 in both config and CLI.
 
-- [ ] **Illegal move retry in evaluation**: When playing Stockfish, the paper retries up to 5 times if the model generates an illegal move before forfeiting. Verify our Stockfish eval handles this and matches the paper's protocol (100 games per Stockfish level, levels 1/3/5, 100ms timeout).
+- [x] **Illegal move retry in evaluation**: Changed from 3 retries + random fallback to 5 retries + forfeit (matching paper). On illegal move, model retries without making a move.
 
-- [ ] **Glicko-2 rating calculation**: The paper uses Glicko-2 to compute model ELO from games against Stockfish. Add or verify we have a Glicko-2 implementation for consistent rating estimation.
+- [x] **Glicko-2 rating calculation**: Added `glicko2.py` with full Glicko-2 implementation. Integrated into `stockfish_eval.py` to compute model rating from game results.
 
 ## Convergence improvements (beyond paper)
 
-- [ ] **Data shuffling (streaming shuffle buffer)**: The IterableDataset reads games sequentially from disk with no shuffling. When the iterator resets between epochs, games are read in the exact same order. This ordering bias hurts convergence. Implement a shuffle buffer that holds N games in memory and yields randomly from it, so we get good shuffling without loading the full dataset into memory.
+- [x] **Data shuffling (streaming shuffle buffer)**: Added `_shuffled_iterator` with configurable buffer size (default 10,000). Available in both `ChessTokenDataset` and `PackedChessDataset`.
 
-- [ ] **SwiGLU activation**: Replace the standard GELU MLP with SwiGLU (used in LLaMA, Gemma, etc.). SwiGLU consistently improves convergence in transformers. The MLP expansion factor changes from 4x to 8/3x to keep param count similar.
+- [x] **SwiGLU activation**: Added `SwiGLUMLP` with 8/3x expansion (rounded to nearest 256). Controlled via `use_swiglu` flag in `ModelConfig` (default `True`). Keeps param count similar to GELU MLP.
 
 ## Training speed improvements
 
-- [ ] **Binary data format**: Training data is stored as comma-separated text files. Every epoch the dataloader re-parses CSV text into integers, which is slow. Switch to memory-mapped binary format (numpy .npy or torch .pt) for near-instant loading.
+- [x] **Binary data format**: Added `OutputFormat::Binary` to Rust `TrainingWriter` (raw bytes, one byte per token). Added `BinaryChessDataset` using numpy memmap for near-instant loading. CLI flag: `--binary`.
 
-- [ ] **Multi-worker data loading**: DataLoader defaults to num_workers=0, meaning data loading blocks the main training thread. The paper uses num_workers=1 with pin_memory. At minimum match that.
+- [x] **Multi-worker data loading**: Changed default `num_workers` from 0 to 1, added `pin_memory=True` when workers > 0.
+
+## Future tasks
+
+- [ ] **Benchmark packed vs unpacked training**: Compare convergence speed and tokens/sec with packed blocks vs padded individual games to quantify the improvement.
+- [ ] **Tune SwiGLU hidden dimension**: The 8/3x expansion rounded to 256 alignment is a good default but may benefit from tuning per model size.
+- [ ] **Add learning rate as CLI arg for min_lr**: Currently min_lr is only configurable via config, add `--min-lr` CLI argument.
+- [ ] **Profile binary vs text data loading**: Benchmark the binary format loading speed against text CSV to quantify improvement.
+- [ ] **Add Glicko-2 rating to wandb logging**: Log the computed Glicko-2 rating alongside win rates during stockfish evaluation.
