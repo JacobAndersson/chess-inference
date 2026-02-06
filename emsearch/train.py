@@ -11,6 +11,7 @@ from tqdm import tqdm
 
 from emsearch.chess_dataset import PAD_TOKEN, create_dataloader
 from emsearch.config import ExperimentConfig, TrainingConfig
+from emsearch.evaluate import run_phase_accuracy
 from emsearch.model import ChessTransformer
 from emsearch.presets import get_preset
 from emsearch.utils import (
@@ -230,6 +231,11 @@ def train(config: ExperimentConfig, run_name: str | None = None) -> None:
                 model, data_dir, config.training.elo_bucket, config.training.batch_size, device
             )
             log_metrics({"eval/loss": val_loss}, step, use_wandb)
+
+            phase_metrics = run_phase_accuracy(
+                model, data_dir, config.training.elo_bucket, config.training.batch_size, device
+            )
+            log_metrics(phase_metrics, step, use_wandb)
 
         if step % config.training.save_every == 0:
             save_checkpoint(
