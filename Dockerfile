@@ -58,9 +58,9 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 # Install Python via uv
 RUN uv python install $PYTHON_VERSION
 
-# Create non-root user
-RUN groupadd -g 1000 $USERNAME && \
-  useradd -m -u 1000 -g $USERNAME -s /bin/zsh $USERNAME && \
+# Create non-root user (use existing GID 1000 if present)
+RUN groupadd -g 1000 $USERNAME 2>/dev/null || true && \
+  useradd -m -u 1000 -g 1000 -s /bin/zsh $USERNAME && \
   mkdir -p /home/$USERNAME/.claude /workspace /commandhistory && \
   chown -R $USERNAME:$USERNAME /home/$USERNAME /workspace /commandhistory
 
