@@ -4,9 +4,9 @@ from emsearch.config import ModelConfig
 
 PRESETS: dict[str, ModelConfig] = {
     "5m": ModelConfig(
-        d_model=128,
-        n_heads=2,
-        n_layers=8,
+        d_model=256,
+        n_heads=4,
+        n_layers=6,
     ),
     "10m": ModelConfig(
         d_model=256,

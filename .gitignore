@@ -1,2 +1,7 @@
 games/*
 processed_games/*
+*.pyc
+logs/*
+emsearch/__pycache__/*
+checkpoints
+todo.md
