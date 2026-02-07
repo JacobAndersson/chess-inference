@@ -254,7 +254,7 @@ def create_dataloader(
     num_workers: int = 1,
     packed: bool = False,
     block_size: int = 1023,
-    shuffle_buffer_size: int = 10_000,
+    shuffle_buffer_size: int = 1_000_000,
 ) -> DataLoader:
     """Create a DataLoader for tokenized chess games.
 
