@@ -1,4 +1,4 @@
-"""Phase 1 experiments: context length and batch size A/B tests."""
+"""Phase 1 + Phase 2 experiments: setup tests then LR sweeps for larger models."""
 
 import logging
 
@@ -60,27 +60,51 @@ def batch_size_experiments(seq_len: int) -> list[tuple[str, ExperimentConfig]]:
     return configs
 
 
+def lr_sweep_experiments(
+    preset: str,
+    seq_len: int,
+    max_steps: int = 20_000,
+) -> list[tuple[str, ExperimentConfig]]:
+    """LR sweep for a given model size."""
+    configs = []
+    for lr in [1e-3, 3e-4, 1e-4]:
+        name = f"{preset}_lr{lr:.0e}"
+        model = get_preset(preset)
+        model.max_seq_len = seq_len
+        training = TrainingConfig(
+            data_dir=DATA_DIR,
+            learning_rate=lr,
+            max_steps=max_steps,
+            checkpoint_dir=f"/workspace/checkpoints/phase2/{name}",
+            wandb_project="chess-transformer-phase2",
+        )
+        configs.append((name, ExperimentConfig(model=model, training=training)))
+    return configs
+
+
+def run_configs(label: str, configs: list[tuple[str, ExperimentConfig]]) -> None:
+    """Run a list of experiment configs sequentially."""
+    logger.info("=== %s: %d runs ===", label, len(configs))
+    for i, (name, config) in enumerate(configs):
+        config.device = "cuda"
+        logger.info("=== Run %d/%d: %s ===", i + 1, len(configs), name)
+        train(config, run_name=name)
+        logger.info("=== Completed: %s ===", name)
+
+
 def main() -> None:
-    """Run all Phase 1 experiments."""
-    setup_logging("phase1")
+    """Run Phase 1 (setup tests) then Phase 2 (LR sweeps for 50M/150M)."""
+    setup_logging("phase1_and_2")
 
-    # Part 1: Context length
-    ctx_configs = context_length_experiments()
-    logger.info("=== Context Length Experiments: %d runs ===", len(ctx_configs))
-    for i, (name, config) in enumerate(ctx_configs):
-        config.device = "cuda"
-        logger.info("=== Run %d/%d: %s ===", i + 1, len(ctx_configs), name)
-        train(config, run_name=name)
-        logger.info("=== Completed: %s ===", name)
+    # Phase 1a: Context length
+    run_configs("Context Length", context_length_experiments())
 
-    # Part 2: Batch size (using seq_len=512 as default, change if ctx1024 wins)
-    bs_configs = batch_size_experiments(seq_len=512)
-    logger.info("=== Batch Size Experiments: %d runs ===", len(bs_configs))
-    for i, (name, config) in enumerate(bs_configs):
-        config.device = "cuda"
-        logger.info("=== Run %d/%d: %s ===", i + 1, len(bs_configs), name)
-        train(config, run_name=name)
-        logger.info("=== Completed: %s ===", name)
+    # Phase 1b: Batch size
+    run_configs("Batch Size", batch_size_experiments(seq_len=512))
+
+    # Phase 2: LR sweeps for larger models (20k steps each)
+    run_configs("50M LR Sweep", lr_sweep_experiments("50m", seq_len=512))
+    run_configs("150M LR Sweep", lr_sweep_experiments("150m", seq_len=512))
 
 
 if __name__ == "__main__":
