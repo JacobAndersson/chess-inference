@@ -16,6 +16,7 @@ from emsearch.model import ChessTransformer
 from emsearch.presets import get_preset
 from emsearch.utils import (
     configure_optimizer,
+    finish_wandb,
     get_lr_scheduler,
     log_metrics,
     save_checkpoint,
@@ -267,6 +268,7 @@ def train(config: ExperimentConfig, run_name: str | None = None) -> None:
 
     pbar.close()
     save_checkpoint(checkpoint_dir / "final.pt", model, optimizer, scheduler, config, step, 0.0)
+    finish_wandb(use_wandb)
     logger.info("Training complete. Checkpoints saved to %s", checkpoint_dir)
 
 

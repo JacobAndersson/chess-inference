@@ -150,12 +150,20 @@ def setup_wandb(
     try:
         import wandb  # noqa: PLC0415
 
-        wandb.init(project=project, name=run_name, config=asdict(config))
+        wandb.init(project=project, name=run_name, config=asdict(config), reinit=True)
     except ImportError:
         print("wandb not installed, skipping logging")
         return False
     else:
         return True
+
+
+def finish_wandb(use_wandb: bool) -> None:
+    """Finish the current wandb run."""
+    if use_wandb:
+        import wandb  # noqa: PLC0415
+
+        wandb.finish()
 
 
 def log_metrics(metrics: dict, step: int, use_wandb: bool) -> None:

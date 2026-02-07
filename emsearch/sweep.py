@@ -17,8 +17,7 @@ DEFAULT_SWEEP = {
     "preset": ["5m"],
     "elo_bucket": ["all", "1500", "2000"],
     "learning_rate": [1e-3, 3e-4, 1e-4],
-    "max_games": [None, 10_000, 50_000],
-    "warmup_steps": [500, 1000],
+    "max_games": [500_000, None],
 }
 
 
@@ -51,17 +50,15 @@ def generate_configs(
         lr = params.pop("learning_rate", 3e-4)
         elo = params.pop("elo_bucket", "all")
         max_games = params.pop("max_games", None)
-        warmup = params.pop("warmup_steps", 1000)
 
         games_label = f"{max_games // 1000}k" if max_games else "full"
-        run_name = f"{preset}_elo{elo}_{games_label}_lr{lr:.0e}_w{warmup}"
+        run_name = f"{preset}_elo{elo}_{games_label}_lr{lr:.0e}"
 
         training_config = TrainingConfig(
             data_dir=data_dir,
             elo_bucket=elo,
             max_games=max_games,
             learning_rate=lr,
-            warmup_steps=warmup,
             max_steps=max_steps,
             checkpoint_dir=f"{base_checkpoint_dir}/{run_name}",
             wandb_project="chess-transformer-sweep",
