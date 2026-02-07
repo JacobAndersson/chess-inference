@@ -14,10 +14,9 @@ from emsearch.utils import setup_logging
 logger = logging.getLogger("emsearch")
 
 DEFAULT_SWEEP = {
-    "preset": ["5m"],
-    "elo_bucket": ["all", "1500", "2000"],
+    "preset": ["5m", "10m"],
+    "elo_bucket": ["all"],
     "learning_rate": [1e-3, 3e-4, 1e-4],
-    "max_games": [500_000, None],
 }
 
 
@@ -51,8 +50,7 @@ def generate_configs(
         elo = params.pop("elo_bucket", "all")
         max_games = params.pop("max_games", None)
 
-        games_label = f"{max_games // 1000}k" if max_games else "full"
-        run_name = f"{preset}_elo{elo}_{games_label}_lr{lr:.0e}"
+        run_name = f"{preset}_lr{lr:.0e}"
 
         training_config = TrainingConfig(
             data_dir=data_dir,
