@@ -35,15 +35,25 @@
 
 - [x] **Multi-worker data loading**: Changed default `num_workers` from 0 to 1, added `pin_memory=True` when workers > 0.
 
-## Scaling experiments
+## Scaling law experiments
 
-- [ ] **Scale to 50M model**: Train the 50M preset (512d, 8 heads, 16 layers) on full ELO data. Compare loss and phase accuracy against 5M/10M to see if data supports larger models.
-- [ ] **Context length scaling**: Increase `max_seq_len` from 512 to 1024/2048. Longer context should improve endgame accuracy by letting the model see full games. Requires matching change in data packing.
-- [ ] **Batch size scaling**: Sweep batch size (256, 512 via gradient accumulation) with proportionally scaled LR. Currently using batch_size=64 (~32k tokens/step).
+Roadmap for producing Chinchilla-style scaling law plots.
 
-## Scaling law visualization
+### Phase 1: Fix training setup
+- [ ] **Context length A/B test**: Compare 512 vs 1024 with best model from current sweep. ~10k steps each. Pick winner and lock in.
+- [ ] **Batch size test**: Compare batch 64 vs 256 (grad_accum=4) vs 512 (grad_accum=8) with proportionally scaled LR. ~10k steps each. Pick winner and lock in.
 
-- [ ] **Scaling law plots**: Create a script that pulls runs from wandb and produces Chinchilla-style plots: loss vs compute (FLOPs = 6 × param_count × tokens_seen) for each model size, showing the optimal compute frontier.
+### Phase 2: LR sweep per model size
+- [x] **5M and 10M LR sweep** (in progress): 3 LRs × 50k steps. Will determine best LR for each.
+- [ ] **50M LR sweep**: Short runs (~10-20k steps) at 3 LRs (1e-3, 3e-4, 1e-4) to find best LR.
+- [ ] **150M LR sweep**: Same as above.
+- [ ] **270M LR sweep** (optional): Only if compute budget allows.
+
+### Phase 3: Final scaling runs
+- [ ] **Final training per model size**: Train each model (5m, 10m, 50m, 150m) at its best LR, varying dataset size and total compute. Log loss vs tokens_seen for scaling curves.
+
+### Phase 4: Visualization
+- [ ] **Scaling law plots**: Script to pull runs from wandb and produce loss vs compute (FLOPs = 6 × param_count × tokens_seen) for each model size, showing the optimal compute frontier.
 
 ## Future tasks
 
