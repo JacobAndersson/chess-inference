@@ -35,6 +35,12 @@
 
 - [x] **Multi-worker data loading**: Changed default `num_workers` from 0 to 1, added `pin_memory=True` when workers > 0.
 
+## Scaling experiments
+
+- [ ] **Scale to 50M model**: Train the 50M preset (512d, 8 heads, 16 layers) on full ELO data. Compare loss and phase accuracy against 5M/10M to see if data supports larger models.
+- [ ] **Context length scaling**: Increase `max_seq_len` from 512 to 1024/2048. Longer context should improve endgame accuracy by letting the model see full games. Requires matching change in data packing.
+- [ ] **Batch size scaling**: Sweep batch size (256, 512 via gradient accumulation) with proportionally scaled LR. Currently using batch_size=64 (~32k tokens/step).
+
 ## Future tasks
 
 - [ ] **Benchmark packed vs unpacked training**: Compare convergence speed and tokens/sec with packed blocks vs padded individual games to quantify the improvement.
