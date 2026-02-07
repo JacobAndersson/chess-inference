@@ -209,11 +209,11 @@ def train(config: ExperimentConfig, run_name: str | None = None) -> None:
         split="train",
     )
 
+    log_metrics({"model/param_count": model.count_parameters()}, 0, use_wandb)
+
     model.train()
-    step = 0
+    step, accum_count, tokens_seen, tokens_since_log = 0, 0, 0, 0
     accum_loss = 0.0
-    accum_count = 0
-    tokens_since_log = 0
     time_since_log = time.time()
 
     pbar = tqdm(total=config.training.max_steps, desc="Training")
@@ -234,6 +234,7 @@ def train(config: ExperimentConfig, run_name: str | None = None) -> None:
 
         accum_loss += loss
         accum_count += 1
+        tokens_seen += tokens
         tokens_since_log += tokens
 
         if step % config.training.log_every == 0:
@@ -243,6 +244,7 @@ def train(config: ExperimentConfig, run_name: str | None = None) -> None:
                     "train/loss": accum_loss / accum_count,
                     "train/lr": scheduler.get_last_lr()[0],
                     "train/tokens_per_sec": tokens_since_log / elapsed if elapsed > 0 else 0,
+                    "train/tokens_seen": tokens_seen,
                 },
                 step,
                 use_wandb,

@@ -41,6 +41,10 @@
 - [ ] **Context length scaling**: Increase `max_seq_len` from 512 to 1024/2048. Longer context should improve endgame accuracy by letting the model see full games. Requires matching change in data packing.
 - [ ] **Batch size scaling**: Sweep batch size (256, 512 via gradient accumulation) with proportionally scaled LR. Currently using batch_size=64 (~32k tokens/step).
 
+## Scaling law visualization
+
+- [ ] **Scaling law plots**: Create a script that pulls runs from wandb and produces Chinchilla-style plots: loss vs compute (FLOPs = 6 × param_count × tokens_seen) for each model size, showing the optimal compute frontier.
+
 ## Future tasks
 
 - [ ] **Benchmark packed vs unpacked training**: Compare convergence speed and tokens/sec with packed blocks vs padded individual games to quantify the improvement.
