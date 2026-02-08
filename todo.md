@@ -37,20 +37,21 @@
 
 ## Scaling law experiments
 
-Roadmap for producing Chinchilla-style scaling law plots.
+Roadmap for producing Chinchilla-style scaling law plots. See `results.md` for detailed findings.
 
-### Phase 1: Fix training setup
-- [ ] **Context length A/B test**: Compare 512 vs 1024 with best model from current sweep. ~10k steps each. Pick winner and lock in.
-- [ ] **Batch size test**: Compare batch 64 vs 256 (grad_accum=4) vs 512 (grad_accum=8) with proportionally scaled LR. ~10k steps each. Pick winner and lock in.
+### Phase 1: Fix training setup (DONE)
+- [x] **Context length**: 512 vs 1024 — no difference. Keeping 512.
+- [x] **Batch size**: bs512 + linear LR scaling is best. Lock in bs=512 (grad_accum=8) for final runs.
 
-### Phase 2: LR sweep per model size
-- [x] **5M and 10M LR sweep** (in progress): 3 LRs × 50k steps. Will determine best LR for each.
-- [ ] **50M LR sweep**: Short runs (~10-20k steps) at 3 LRs (1e-3, 3e-4, 1e-4) to find best LR.
-- [ ] **150M LR sweep**: Same as above.
-- [ ] **270M LR sweep** (optional): Only if compute budget allows.
+### Phase 2: LR sweep per model size (DONE)
+- [x] **5M and 10M**: lr=1e-3 best for both (50k steps).
+- [x] **50M**: lr=1e-3 best (20k steps, loss=0.467).
+- [x] **150M**: lr=1e-3 tested at bs=32 (20k steps, loss=0.499). OOM at bs=64 on 24GB GPU.
 
 ### Phase 3: Final scaling runs
-- [ ] **Final training per model size**: Train each model (5m, 10m, 50m, 150m) at its best LR, varying dataset size and total compute. Log loss vs tokens_seen for scaling curves.
+- [ ] **Fix 150M training**: Use gradient accumulation (bs=32, grad_accum=2 or 4) to get effective batch size up while fitting in memory. Retest with larger effective batch + scaled LR.
+- [ ] **Final training per model size**: Train each model (5m, 10m, 50m, 150m) at bs=512 equivalent (via grad_accum), lr scaled linearly from 1e-3 base at bs=64. Run long enough for loss to plateau, logging loss vs tokens_seen.
+- [ ] **Dataset size variation**: For each model size, run with 1M, 10M, 100M, and full dataset to measure data scaling.
 
 ### Phase 4: Visualization
 - [ ] **Scaling law plots**: Script to pull runs from wandb and produce loss vs compute (FLOPs = 6 × param_count × tokens_seen) for each model size, showing the optimal compute frontier.
