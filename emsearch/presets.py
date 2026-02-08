@@ -18,6 +18,11 @@ PRESETS: dict[str, ModelConfig] = {
         n_heads=8,
         n_layers=16,
     ),
+    "100m": ModelConfig(
+        d_model=640,
+        n_heads=10,
+        n_layers=20,
+    ),
     "150m": ModelConfig(
         d_model=768,
         n_heads=12,
